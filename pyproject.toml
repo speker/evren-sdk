@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evren-sdk"
-version = "0.5.1"
+version = "0.5.2"
 description = "EVREN MLOps Platform — Python inference SDK for object detection, classification, and segmentation models."
 readme = "README_PYPI.md"
 requires-python = ">=3.10"

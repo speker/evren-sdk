@@ -157,7 +157,7 @@ class EvrenCamera:
         jpeg_quality: int = 70,
         draw: bool = True,
         base_url: str = "https://api.ssyz.org.tr/api/v1",
-        verify: bool = True,
+        verify: bool = False,
     ) -> None:
         _require_cv2()
         self._client = EvrenClient(api_key=api_key, base_url=base_url, verify=verify)
@@ -239,7 +239,9 @@ class EvrenCamera:
                         iou=self._iou,
                         image_size=self._imgsz,
                     )
-                except Exception:
+                except Exception as exc:
+                    import sys
+                    print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
                     time.sleep(0.3)
                     continue
 
@@ -365,7 +367,9 @@ class EvrenCamera:
                         iou=self._iou,
                         image_size=self._imgsz,
                     )
-                except Exception:
+                except Exception as exc:
+                    import sys
+                    print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
                     writer.write(frame)
                     continue
 

@@ -202,7 +202,7 @@ class EvrenClient:
     def __init__(self, api_key: str, *,
                  base_url: str = _API_BASE,
                  timeout: float = 60.0,
-                 verify: bool = True) -> None:
+                 verify: bool = False) -> None:
         self._http = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers=_auth_headers(api_key),
@@ -456,7 +456,7 @@ class AsyncEvrenClient:
     def __init__(self, api_key: str, *,
                  base_url: str = _API_BASE,
                  timeout: float = 60.0,
-                 verify: bool = True) -> None:
+                 verify: bool = False) -> None:
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers=_auth_headers(api_key),
