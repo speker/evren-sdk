@@ -1,17 +1,25 @@
 """EVREN WebSocket inference client — gateway'e dogrudan baglanti.
 
-HTTP POST yerine persistent WS baglantisi uzerinden frame gonderir.
-Tek connection ile tum frame'ler iletilir — connection overhead yok.
+Iki mod destekler:
+  1. predict_frame() — senkron, tek frame gonder-al
+  2. Pipeline — submit/next_result ile multi-frame in-flight (GPU hic bos kalmaz)
 
     ws = InferenceWSClient("evren_xxx", "owner/model")
     ws.connect()
-    result = ws.predict_frame(jpeg_bytes)
+    ws.start_pipeline()
+    ws.submit(jpeg1)
+    ws.submit(jpeg2)       # GPU jpeg1 islerken jpeg2 kuyrukta
+    r1 = ws.next_result()  # jpeg1 sonucu
+    r2 = ws.next_result()  # jpeg2 sonucu
+    ws.stop_pipeline()
     ws.close()
 """
 from __future__ import annotations
 
 import json
+import queue
 import ssl
+import threading
 import time
 import logging
 from typing import Any
@@ -44,7 +52,6 @@ def _build_ws_url(
     else:
         ws_host = "wss://" + host
 
-    # /api/v1 prefix'ini cikar — gateway /inference-gw/ altinda
     for suffix in ("/api/v1", "/api"):
         if ws_host.endswith(suffix):
             ws_host = ws_host[: -len(suffix)]
@@ -61,13 +68,14 @@ def _build_ws_url(
 
 
 class InferenceWSClient:
-    """Sync WebSocket client — EvrenCamera ile kullanilir."""
 
     __slots__ = (
         "_api_key", "_model", "_conf", "_iou", "_imgsz",
         "_base_url", "_verify", "_ws", "_connected",
         "_class_map", "_color_map", "_weights_url",
         "_reconnect_count",
+        "_send_q", "_recv_q", "_pipe_stop",
+        "_send_thr", "_recv_thr", "_pipeline_on",
     )
 
     def __init__(
@@ -94,9 +102,14 @@ class InferenceWSClient:
         self._color_map: dict[str, str] = {}
         self._weights_url: str | None = None
         self._reconnect_count = 0
+        self._send_q: queue.Queue | None = None
+        self._recv_q: queue.Queue | None = None
+        self._pipe_stop: threading.Event | None = None
+        self._send_thr: threading.Thread | None = None
+        self._recv_thr: threading.Thread | None = None
+        self._pipeline_on = False
 
     def connect(self) -> None:
-        """Model resolve + class info fetch + WS baglantisi kur."""
         try:
             from websockets.sync.client import connect as ws_connect
         except ImportError:
@@ -161,30 +174,15 @@ class InferenceWSClient:
         except Exception:
             return False
 
-    def predict_frame(self, jpeg_bytes: bytes) -> PredictResult:
-        if not self._connected or self._ws is None:
-            raise RuntimeError("WS baglantisi yok — once connect() cagirin")
+    # ----- parse helper -----
 
-        try:
-            self._ws.send(jpeg_bytes)
-            raw = self._ws.recv(timeout=10)
-        except Exception as exc:
-            self._connected = False
-            if self._reconnect():
-                self._ws.send(jpeg_bytes)
-                raw = self._ws.recv(timeout=10)
-            else:
-                raise RuntimeError(f"WS baglantisi koptu: {exc}") from exc
-
+    def _parse_raw(self, raw: str | bytes) -> PredictResult | None:
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
         data: dict[str, Any] = json.loads(raw)
 
         if data.get("type") == "session_expired":
-            self._connected = False
-            if self._reconnect():
-                return self.predict_frame(jpeg_bytes)
-            raise RuntimeError("WS session suresi doldu")
+            return None
 
         preds_raw = data.get("predictions", [])
         self._remap_predictions(preds_raw)
@@ -207,6 +205,104 @@ class InferenceWSClient:
             predictions=predictions,
             inference_ms=data.get("inference_ms", 0),
         )
+
+    # ----- senkron (eski uyumluluk) -----
+
+    def predict_frame(self, jpeg_bytes: bytes) -> PredictResult:
+        if not self._connected or self._ws is None:
+            raise RuntimeError("WS baglantisi yok — once connect() cagirin")
+
+        try:
+            self._ws.send(jpeg_bytes)
+            raw = self._ws.recv(timeout=10)
+        except Exception as exc:
+            self._connected = False
+            if self._reconnect():
+                self._ws.send(jpeg_bytes)
+                raw = self._ws.recv(timeout=10)
+            else:
+                raise RuntimeError(f"WS baglantisi koptu: {exc}") from exc
+
+        result = self._parse_raw(raw)
+        if result is None:
+            self._connected = False
+            if self._reconnect():
+                return self.predict_frame(jpeg_bytes)
+            raise RuntimeError("WS session suresi doldu")
+
+        return result
+
+    # ----- pipeline API (multi-frame in-flight) -----
+
+    def start_pipeline(self, max_inflight: int = 3) -> None:
+        """Send/recv thread'lerini baslat — GPU hic bos kalmaz."""
+        if self._pipeline_on:
+            return
+        self._send_q = queue.Queue(maxsize=max_inflight)
+        self._recv_q = queue.Queue(maxsize=max_inflight + 1)
+        self._pipe_stop = threading.Event()
+        self._send_thr = threading.Thread(
+            target=self._pipe_send_loop, daemon=True, name="evren-ws-tx",
+        )
+        self._recv_thr = threading.Thread(
+            target=self._pipe_recv_loop, daemon=True, name="evren-ws-rx",
+        )
+        self._send_thr.start()
+        self._recv_thr.start()
+        self._pipeline_on = True
+
+    def _pipe_send_loop(self) -> None:
+        while not self._pipe_stop.is_set():
+            try:
+                jpg = self._send_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if jpg is None:
+                break
+            try:
+                self._ws.send(jpg)
+            except Exception:
+                self._recv_q.put(None)
+                break
+
+    def _pipe_recv_loop(self) -> None:
+        while not self._pipe_stop.is_set():
+            try:
+                raw = self._ws.recv(timeout=5)
+            except Exception:
+                self._recv_q.put(None)
+                break
+            result = self._parse_raw(raw)
+            if result is None:
+                self._recv_q.put(None)
+                break
+            self._recv_q.put(result)
+
+    def submit(self, jpeg_bytes: bytes) -> None:
+        """Frame'i inference kuyruğuna gönder (non-blocking eger yer varsa)."""
+        if self._send_q is None:
+            raise RuntimeError("Pipeline baslatilmadi — start_pipeline() cagir")
+        self._send_q.put(jpeg_bytes, timeout=10)
+
+    def next_result(self, timeout: float = 10.0) -> PredictResult | None:
+        if self._recv_q is None:
+            raise RuntimeError("Pipeline baslatilmadi")
+        return self._recv_q.get(timeout=timeout)
+
+    def stop_pipeline(self) -> None:
+        if not self._pipeline_on:
+            return
+        self._pipeline_on = False
+        if self._pipe_stop:
+            self._pipe_stop.set()
+        if self._send_q:
+            self._send_q.put(None)
+        if self._send_thr:
+            self._send_thr.join(timeout=3)
+        if self._recv_thr:
+            self._recv_thr.join(timeout=3)
+
+    # ----- remap -----
 
     def _remap_predictions(self, preds: list[dict]) -> None:
         if not self._class_map:
@@ -231,6 +327,7 @@ class InferenceWSClient:
         return self._connected
 
     def close(self) -> None:
+        self.stop_pipeline()
         self._connected = False
         if self._ws is not None:
             try:
@@ -247,5 +344,5 @@ class InferenceWSClient:
         self.close()
 
     def __repr__(self) -> str:
-        st = "connected" if self._connected else "disconnected"
+        st = "pipeline" if self._pipeline_on else ("connected" if self._connected else "disconnected")
         return f"<InferenceWSClient model={self._model!r} {st}>"

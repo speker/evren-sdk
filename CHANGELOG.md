@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0] - 2026-04-12
+
+### Added
+- True pipeline modu: video dosyalari icin de capture/encode/predict tam paralel calisir
+- WS multi-frame in-flight: send/recv ayri thread, GPU hic bos kalmaz (3 frame kuyrukta)
+- `InferenceWSClient.start_pipeline()` / `stop_pipeline()` / `submit()` / `next_result()` API
+- `record()` metodu da WS pipeline destekliyor
+
+### Changed
+- `_hud()` alpha blend kaldirildi — frame.copy() yerine direkt cizim (2-3ms kazanc)
+- Encode islemi worker thread'e tasindi — main thread sadece draw+yield yapar
+- HTTP modu da pipeline: encode+predict ayri thread'de, draw main'de
+
+### Removed
+- Eski `_stream_sequential` ve `_stream_pipeline` metodlari — tek birlesik pipeline ile degistirildi
+
 ## [0.6.1] - 2026-04-12
 
 ### Fixed
