@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evren-sdk"
-version = "0.5.3"
+version = "0.6.0"
 description = "EVREN MLOps Platform — Python inference SDK for object detection, classification, and segmentation models."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-edge = ["opencv-python>=4.8"]
+edge = ["opencv-python>=4.8", "websockets>=12.0"]
 dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 
 [project.urls]

@@ -1,70 +1,36 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/).
-
-## [0.5.1] - 2026-03-09
+## [0.6.0] - 2026-04-12
 
 ### Added
-- `InsufficientCreditsError` exception for HTTP 402 (insufficient credit balance).
-- `e.required` and `e.available` fields on credit errors for programmatic handling.
+- WebSocket streaming client (`InferenceWSClient`) — gateway'e persistent baglanti
+- Client-side auto-resize — inference oncesi frame kucultme, payload %60 azalir
+- Pipeline (double-buffer) pattern — live kaynaklarda capture/predict paralel calisir
+- `EvrenCamera` `mode` parametresi: `"auto"` | `"http"` | `"ws"`
+- `EvrenCamera` `resize` parametresi: client-side resize acma/kapama
+- `EvrenClient.resolve_ws_params()` — model slug'dan weights_url cozumleme
+- Client-side class remap (DETR modelleri icin `class_0` → gercek sinif adi)
+- WS auto-reconnect (session timeout/disconnect sonrasi otomatik yeniden baglanti)
 
 ### Fixed
-- HTTP 402 responses were not caught by SDK — fell through to generic `httpx.HTTPStatusError`.
-
-## [0.5.0] - 2026-03-09
-
-### Added
-- `PredictResult.filter()` — filter predictions by confidence range or class names.
-- `PredictResult.to_yolo()` — export predictions in YOLO annotation format.
-- `PredictResult.to_coco()` — export predictions in COCO annotation format.
-- `PredictResult.to_csv()` — export predictions as CSV string.
-- `PredictResult.save()` — save results to file (JSON, CSV, or YOLO txt).
-- `Prediction.to_dict()` — dictionary serialization.
-- `client.benchmark()` — measure inference latency and throughput (avg, min, max, p95, FPS).
-- `client.download_model()` — download trained model weights (ONNX or PyTorch).
-- `client.submit_for_review()` — send images with pre-annotations to a dataset for active learning.
-- `BenchmarkResult` dataclass for performance measurement data.
-
-## [0.4.0] - 2026-03-15
-
-### Added
-- `EvrenCamera` for real-time camera/video/RTSP inference on GPU-free edge devices.
-- `EvrenCamera.stream()` — iterator yielding annotated frames with predictions.
-- `EvrenCamera.run()` — one-liner OpenCV window with HUD overlay (FPS, latency, count).
-- `EvrenCamera.scan()` — batch process image folders with optional annotated output.
-- `EvrenCamera.record()` — process video and save annotated output file.
-- `draw_predictions()` — standalone annotation renderer (bbox, OBB, keypoints, masks).
-- Pipeline threading: capture thread runs parallel to inference, zero frame lag.
-- Smart frame dropping: always processes the latest frame, never backlogs.
-- HUD overlay: semi-transparent status bar with detection count, latency, FPS.
-- `pip install evren-sdk[edge]` optional dependency group for OpenCV.
-
-## [0.3.0] - 2026-03-14
-
-### Added
-- `predict_batch()` for GPU batch inference on multiple images.
-- `warmup()` to pre-load models onto GPU and eliminate cold-start latency.
-- `model_classes()` to retrieve class names, colors, and architecture info.
-- `list_models()` and `list_versions()` for model discovery.
-- `AsyncEvrenClient` with full async/await support via `httpx.AsyncClient`.
-- `py.typed` marker for PEP 561 type-checker support.
-- Custom exceptions: `AuthenticationError`, `NotFoundError`, `RateLimitError`, `ValidationError`, `InferenceError`.
-- Model slug resolution with version tags (`owner/slug:v2.0`).
+- `draw_predictions` normalized (0-1) koordinatlari frame boyutuna scale eder
+- Mask ve keypoint koordinatlari da normalize/pixel ayrimi yapar
 
 ### Changed
-- All dataclasses use `slots=True` for lower memory footprint.
-- `Prediction.__repr__` shows class name and confidence.
-- `BatchResult` is iterable and supports `len()`.
+- Default `jpeg_quality` 70 → 55 (inference icin yeterli, %30 daha kucuk payload)
+- Default `max_fps` 15 → 30 (WS ile daha yuksek throughput mumkun)
 
-## [0.2.0] - 2026-03-10
+## [0.5.3] - 2026-04-10
+
+### Fixed
+- `download_model` format alias ("pt" → "pytorch") duzeltildi
+- `ModelInfo` ve `ModelVersion` dataclass'larina eksik alanlar eklendi
+
+## [0.5.2] - 2026-04-08
 
 ### Added
-- Single image prediction via `predict()`.
-- API key and JWT token authentication.
-
-## [0.1.0] - 2026-03-08
-
-### Added
-- Initial release with basic client structure.
+- Ilk public release
+- `EvrenClient` ve `AsyncEvrenClient`
+- `EvrenCamera` edge modulu
+- `predict`, `predict_batch`, `model_classes`, `warmup`, `benchmark`
+- `download_model` (pytorch/onnx/tensorrt/tflite)

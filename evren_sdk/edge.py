@@ -12,6 +12,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -27,7 +28,6 @@ try:
 except ImportError:
     _CV2 = False
 
-# BGR fallback paleti — sinif rengi yoksa dongusel kullanilir
 _PAL = [
     (248, 189, 56), (94, 197, 34), (36, 191, 251),
     (94, 63, 244), (247, 85, 168), (22, 115, 249),
@@ -48,6 +48,14 @@ def _hex_bgr(h: str) -> tuple[int, int, int]:
     return int(h[4:6], 16), int(h[2:4], 16), int(h[0:2], 16)
 
 
+def _is_normalized(bbox: list[float]) -> bool:
+    return all(0.0 <= v <= 1.0 for v in bbox[:4])
+
+
+def _denorm(val: float, dim: int) -> int:
+    return int(val * dim) if val <= 1.0 else int(val)
+
+
 # -------------------------------------------------------------------
 # draw
 # -------------------------------------------------------------------
@@ -60,16 +68,23 @@ def draw_predictions(
     font_scale: float = 0.55,
     show_conf: bool = True,
 ) -> np.ndarray:
-    """Tahminleri frame uzerine render eder (in-place + return)."""
     _require_cv2()
+    fh, fw = frame.shape[:2]
     fnt = cv2.FONT_HERSHEY_SIMPLEX
 
     for i, p in enumerate(predictions):
         col = _hex_bgr(p.color) if p.color else _PAL[i % len(_PAL)]
 
         if p.bbox and len(p.bbox) >= 4:
-            x1, y1 = int(p.bbox[0]), int(p.bbox[1])
-            x2, y2 = int(p.bbox[2]), int(p.bbox[3])
+            norm = _is_normalized(p.bbox)
+            if norm:
+                x1 = int(p.bbox[0] * fw)
+                y1 = int(p.bbox[1] * fh)
+                x2 = int(p.bbox[2] * fw)
+                y2 = int(p.bbox[3] * fh)
+            else:
+                x1, y1 = int(p.bbox[0]), int(p.bbox[1])
+                x2, y2 = int(p.bbox[2]), int(p.bbox[3])
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), col, thickness)
 
@@ -95,21 +110,29 @@ def draw_predictions(
                 if len(kp) >= 2:
                     vis = kp[2] if len(kp) > 2 else 1.0
                     if vis > 0.3:
-                        cv2.circle(frame, (int(kp[0]), int(kp[1])), 4, col, -1)
+                        kx = _denorm(kp[0], fw)
+                        ky = _denorm(kp[1], fh)
+                        cv2.circle(frame, (kx, ky), 4, col, -1)
 
         if p.mask and len(p.mask) > 2:
             import numpy as _np
-            pts = _np.array(p.mask, dtype=_np.int32)
-            overlay = frame.copy()
-            cv2.fillPoly(overlay, [pts], col)
-            cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
-            cv2.polylines(frame, [pts], True, col, 1, cv2.LINE_AA)
+            pts = []
+            for pt in p.mask:
+                if len(pt) >= 2:
+                    px = _denorm(pt[0], fw)
+                    py = _denorm(pt[1], fh)
+                    pts.append([px, py])
+            if pts:
+                arr = _np.array(pts, dtype=_np.int32)
+                overlay = frame.copy()
+                cv2.fillPoly(overlay, [arr], col)
+                cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
+                cv2.polylines(frame, [arr], True, col, 1, cv2.LINE_AA)
 
     return frame
 
 
 def _hud(frame: np.ndarray, text: str) -> None:
-    """Sol alt koseye yari-saydam HUD cizer."""
     h = frame.shape[0]
     fnt = cv2.FONT_HERSHEY_SIMPLEX
     (tw, th), _ = cv2.getTextSize(text, fnt, 0.48, 1)
@@ -124,6 +147,16 @@ def _hud(frame: np.ndarray, text: str) -> None:
     )
 
 
+def _resize_for_inference(frame: np.ndarray, target: int) -> np.ndarray:
+    """Inference oncesi frame'i kucult — payload boyutunu dusurur."""
+    h, w = frame.shape[:2]
+    if max(h, w) <= target:
+        return frame
+    scale = target / max(h, w)
+    nw, nh = int(w * scale), int(h * scale)
+    return cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+
+
 # -------------------------------------------------------------------
 # camera
 # -------------------------------------------------------------------
@@ -131,18 +164,18 @@ def _hud(frame: np.ndarray, text: str) -> None:
 class EvrenCamera:
     """Herhangi bir kamera/video/RTSP kaynagini EVREN GPU'lariyla isle.
 
-    Cikarim bulutta calisir, kullanici lokal model gibi deneyimler.
-
     >>> cam = EvrenCamera("evren_...", "owner/model")
-    >>> cam.run(0)                          # webcam, ESC ile kapat
-    >>> for f, r in cam.stream("video.mp4"):  # veya iterator
+    >>> cam.run(0)
+    >>> for f, r in cam.stream("video.mp4"):
     ...     print(r.count)
     """
 
     __slots__ = (
         "_client", "_model", "_conf", "_iou", "_imgsz",
-        "_max_fps", "_jpeg_q", "_draw",
+        "_max_fps", "_jpeg_q", "_draw", "_resize",
         "_stop", "_total_frames", "_total_lat",
+        "_mode", "_api_key", "_base_url", "_verify",
+        "_ws_conn",
     )
 
     def __init__(
@@ -153,9 +186,11 @@ class EvrenCamera:
         confidence: float = 0.25,
         iou: float = 0.45,
         image_size: int = 640,
-        max_fps: float = 15.0,
-        jpeg_quality: int = 70,
+        max_fps: float = 30.0,
+        jpeg_quality: int = 55,
         draw: bool = True,
+        resize: bool = True,
+        mode: str = "auto",
         base_url: str = "https://api.ssyz.org.tr/api/v1",
         verify: bool = False,
     ) -> None:
@@ -168,9 +203,56 @@ class EvrenCamera:
         self._max_fps = max_fps
         self._jpeg_q = jpeg_quality
         self._draw = draw
+        self._resize = resize
+        self._mode = mode
+        self._api_key = api_key
+        self._base_url = base_url
+        self._verify = verify
+        self._ws_conn = None
         self._stop = threading.Event()
         self._total_frames = 0
         self._total_lat = 0.0
+
+    def _is_live_source(self, source: int | str) -> bool:
+        if isinstance(source, int):
+            return True
+        s = str(source).lower()
+        return s.startswith("rtsp://") or s.startswith("http://") or s.startswith("https://")
+
+    def _try_ws_connect(self) -> bool:
+        if self._mode == "http":
+            return False
+        try:
+            from .ws_client import InferenceWSClient
+            ws = InferenceWSClient(
+                api_key=self._api_key,
+                model=self._model,
+                confidence=self._conf,
+                iou=self._iou,
+                image_size=self._imgsz,
+                base_url=self._base_url,
+                verify=self._verify,
+            )
+            ws.connect()
+            self._ws_conn = ws
+            return True
+        except Exception:
+            self._ws_conn = None
+            if self._mode == "ws":
+                raise
+            return False
+
+    def _predict_frame(self, jpg_bytes: bytes) -> PredictResult:
+        if self._ws_conn is not None:
+            try:
+                return self._ws_conn.predict_frame(jpg_bytes)
+            except Exception:
+                self._ws_conn = None
+        return self._client.predict(
+            self._model, jpg_bytes,
+            confidence=self._conf, iou=self._iou,
+            image_size=self._imgsz,
+        )
 
     # -- public api --------------------------------------------------
 
@@ -178,7 +260,7 @@ class EvrenCamera:
         self,
         source: int | str = 0,
     ) -> Iterator[tuple[np.ndarray, PredictResult]]:
-        """Frame-by-frame cikarim. Capture ayri thread'de calisir.
+        """Frame-by-frame cikarim. Live kaynaklarda pipeline modu aktif.
 
         Args:
             source: 0=webcam, "video.mp4", "rtsp://..." veya gorsel yolu.
@@ -190,8 +272,11 @@ class EvrenCamera:
         if not cap.isOpened():
             raise RuntimeError(f"Kaynak acilamadi: {source}")
 
-        latest: queue.Queue[np.ndarray] = queue.Queue(maxsize=1)
+        self._try_ws_connect()
+
+        latest: queue.Queue[np.ndarray] = queue.Queue(maxsize=2)
         self._stop.clear()
+        is_live = self._is_live_source(source)
 
         def _grab():
             while not self._stop.is_set():
@@ -199,24 +284,115 @@ class EvrenCamera:
                 if not ok:
                     self._stop.set()
                     break
-                # sadece son frame'i tut, eskiyi at
-                try:
-                    latest.get_nowait()
-                except queue.Empty:
-                    pass
-                latest.put(frm)
+                if is_live:
+                    try:
+                        latest.get_nowait()
+                    except queue.Empty:
+                        pass
+                    latest.put(frm)
+                else:
+                    latest.put(frm, timeout=2.0)
 
         thr = threading.Thread(target=_grab, daemon=True, name="evren-capture")
         thr.start()
         min_dt = 1.0 / self._max_fps if self._max_fps > 0 else 0.0
+
+        if is_live:
+            yield from self._stream_pipeline(latest, min_dt)
+        else:
+            yield from self._stream_sequential(latest, min_dt)
+
+        self._stop.set()
+        thr.join(timeout=2)
+        cap.release()
+        if self._ws_conn:
+            try:
+                self._ws_conn.close()
+            except Exception:
+                pass
+            self._ws_conn = None
+
+    def _stream_sequential(
+        self, src_q: queue.Queue, min_dt: float,
+    ) -> Iterator[tuple[np.ndarray, PredictResult]]:
         last_ts = 0.0
         fps_t = time.monotonic()
         fps_cnt = 0
 
+        while not self._stop.is_set():
+            try:
+                frame = src_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            now = time.monotonic()
+            if now - last_ts < min_dt:
+                continue
+            last_ts = now
+
+            send_frame = _resize_for_inference(frame, self._imgsz) if self._resize else frame
+            _, buf = cv2.imencode(".jpg", send_frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_q])
+
+            t0 = time.monotonic()
+            try:
+                result = self._predict_frame(buf.tobytes())
+            except Exception as exc:
+                import sys
+                print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
+                time.sleep(0.3)
+                continue
+
+            lat = (time.monotonic() - t0) * 1000
+            self._total_frames += 1
+            self._total_lat += lat
+
+            fps_cnt += 1
+            elapsed = time.monotonic() - fps_t
+            fps = fps_cnt / elapsed if elapsed > 0.5 else 0.0
+            if elapsed > 2.0:
+                fps_t, fps_cnt = time.monotonic(), 0
+
+            if self._draw:
+                draw_predictions(frame, result.predictions)
+                _hud(frame, f"{result.count} tespit | {lat:.0f}ms | {fps:.1f} FPS")
+
+            yield frame, result
+
+    def _stream_pipeline(
+        self, src_q: queue.Queue, min_dt: float,
+    ) -> Iterator[tuple[np.ndarray, PredictResult]]:
+        result_q: queue.Queue[PredictResult] = queue.Queue(maxsize=1)
+        last_result: PredictResult | None = None
+        last_ts = 0.0
+        fps_t = time.monotonic()
+        fps_cnt = 0
+
+        def _predict_worker():
+            while not self._stop.is_set():
+                try:
+                    jpg = job_q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                if jpg is None:
+                    break
+                try:
+                    r = self._predict_frame(jpg)
+                    try:
+                        result_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    result_q.put(r)
+                except Exception:
+                    pass
+
+        job_q: queue.Queue[bytes | None] = queue.Queue(maxsize=1)
+        pred_thr = threading.Thread(target=_predict_worker, daemon=True, name="evren-predict")
+        pred_thr.start()
+
         try:
             while not self._stop.is_set():
                 try:
-                    frame = latest.get(timeout=0.5)
+                    frame = src_q.get(timeout=0.5)
                 except queue.Empty:
                     continue
 
@@ -225,46 +401,37 @@ class EvrenCamera:
                     continue
                 last_ts = now
 
-                _, buf = cv2.imencode(
-                    ".jpg", frame,
-                    [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_q],
-                )
-                jpg_bytes = buf.tobytes()
-
-                t0 = time.monotonic()
+                send_frame = _resize_for_inference(frame, self._imgsz) if self._resize else frame
+                _, buf = cv2.imencode(".jpg", send_frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_q])
                 try:
-                    result = self._client.predict(
-                        self._model, jpg_bytes,
-                        confidence=self._conf,
-                        iou=self._iou,
-                        image_size=self._imgsz,
-                    )
-                except Exception as exc:
-                    import sys
-                    print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
-                    time.sleep(0.3)
-                    continue
+                    job_q.get_nowait()
+                except queue.Empty:
+                    pass
+                job_q.put(buf.tobytes())
 
-                lat = (time.monotonic() - t0) * 1000
-                self._total_frames += 1
-                self._total_lat += lat
+                try:
+                    r = result_q.get_nowait()
+                    last_result = r
+                    lat = 0.0
+                    self._total_frames += 1
+                    fps_cnt += 1
+                except queue.Empty:
+                    pass
 
-                fps_cnt += 1
                 elapsed = time.monotonic() - fps_t
                 fps = fps_cnt / elapsed if elapsed > 0.5 else 0.0
                 if elapsed > 2.0:
-                    fps_t = time.monotonic()
-                    fps_cnt = 0
+                    fps_t, fps_cnt = time.monotonic(), 0
 
-                if self._draw:
-                    draw_predictions(frame, result.predictions)
-                    _hud(frame, f"{result.count} tespit | {lat:.0f}ms | {fps:.1f} FPS")
+                if last_result and self._draw:
+                    draw_predictions(frame, last_result.predictions)
+                    _hud(frame, f"{last_result.count} tespit | {fps:.1f} FPS")
 
-                yield frame, result
+                if last_result:
+                    yield frame, last_result
         finally:
-            self._stop.set()
-            thr.join(timeout=2)
-            cap.release()
+            job_q.put(None)
+            pred_thr.join(timeout=2)
 
     def run(
         self,
@@ -287,16 +454,7 @@ class EvrenCamera:
         pattern: str = "*.jpg",
         save_to: str | Path | None = None,
     ) -> Iterator[tuple[Path, PredictResult]]:
-        """Klasordeki gorselleri toplu isle.
-
-        Args:
-            folder: gorsel dizini.
-            pattern: glob deseni ("*.jpg", "*.png", "**/*.jpg").
-            save_to: annotated sonuclari kaydetme dizini.
-
-        Yields:
-            (dosya_yolu, PredictResult)
-        """
+        """Klasordeki gorselleri toplu isle."""
         src = Path(folder)
         out = Path(save_to) if save_to else None
         if out:
@@ -325,17 +483,12 @@ class EvrenCamera:
         codec: str = "mp4v",
         fps: float = 0.0,
     ) -> None:
-        """Annotated video kaydet.
-
-        Args:
-            source: giris kaynagi.
-            output: cikis dosyasi ("sonuc.mp4").
-            codec: FourCC codec ("mp4v", "XVID").
-            fps: cikis fps, 0 ise kaynaktan al.
-        """
+        """Annotated video kaydet."""
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
             raise RuntimeError(f"Kaynak acilamadi: {source}")
+
+        self._try_ws_connect()
 
         src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         out_fps = fps if fps > 0 else min(src_fps, self._max_fps)
@@ -356,17 +509,10 @@ class EvrenCamera:
                 if idx % skip != 0:
                     continue
 
-                _, buf = cv2.imencode(
-                    ".jpg", frame,
-                    [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_q],
-                )
+                send_frame = _resize_for_inference(frame, self._imgsz) if self._resize else frame
+                _, buf = cv2.imencode(".jpg", send_frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_q])
                 try:
-                    result = self._client.predict(
-                        self._model, buf.tobytes(),
-                        confidence=self._conf,
-                        iou=self._iou,
-                        image_size=self._imgsz,
-                    )
+                    result = self._predict_frame(buf.tobytes())
                 except Exception as exc:
                     import sys
                     print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
@@ -380,10 +526,15 @@ class EvrenCamera:
         finally:
             writer.release()
             cap.release()
+            if self._ws_conn:
+                try:
+                    self._ws_conn.close()
+                except Exception:
+                    pass
+                self._ws_conn = None
 
     @property
     def stats(self) -> dict[str, float]:
-        """Oturum istatistikleri."""
         n = self._total_frames or 1
         return {
             "frames": self._total_frames,
@@ -396,6 +547,12 @@ class EvrenCamera:
 
     def close(self) -> None:
         self.stop()
+        if self._ws_conn:
+            try:
+                self._ws_conn.close()
+            except Exception:
+                pass
+            self._ws_conn = None
         self._client.close()
 
     def __enter__(self) -> EvrenCamera:
@@ -405,4 +562,4 @@ class EvrenCamera:
         self.close()
 
     def __repr__(self) -> str:
-        return f"<EvrenCamera model={self._model!r} fps={self._max_fps}>"
+        return f"<EvrenCamera model={self._model!r} mode={self._mode} fps={self._max_fps}>"

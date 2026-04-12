@@ -268,6 +268,29 @@ class EvrenClient:
     def _vid(self, model: str) -> str:
         return model if _is_uuid(model) else self.resolve(model)
 
+    def resolve_ws_params(self, model: str) -> tuple[str, str | None]:
+        """WS baglantisi icin (version_id, weights_url) cozumler."""
+        vid = self._vid(model)
+        slug_part = model.partition(":")[0]
+        if _is_uuid(slug_part):
+            mid = slug_part
+        else:
+            r = self._http.get(f"/models/{slug_part}")
+            if r.status_code != 200:
+                _raise_for(r)
+            mid = _unwrap(r.json())["id"]
+
+        r2 = self._http.get(f"/models/{mid}/versions")
+        if r2.status_code != 200:
+            _raise_for(r2)
+        versions = _resolve_versions(r2.json())
+        for v in versions:
+            if v.get("id") == vid:
+                return vid, v.get("weights_url")
+        if versions:
+            return vid, versions[0].get("weights_url")
+        return vid, None
+
     def predict(self, model: str, image: str | Path | bytes, *,
                 confidence: float = 0.25, iou: float = 0.45,
                 image_size: int = 640,
@@ -520,6 +543,28 @@ class AsyncEvrenClient:
 
     async def _vid(self, model: str) -> str:
         return model if _is_uuid(model) else await self.resolve(model)
+
+    async def resolve_ws_params(self, model: str) -> tuple[str, str | None]:
+        vid = await self._vid(model)
+        slug_part = model.partition(":")[0]
+        if _is_uuid(slug_part):
+            mid = slug_part
+        else:
+            r = await self._http.get(f"/models/{slug_part}")
+            if r.status_code != 200:
+                _raise_for(r)
+            mid = _unwrap(r.json())["id"]
+
+        r2 = await self._http.get(f"/models/{mid}/versions")
+        if r2.status_code != 200:
+            _raise_for(r2)
+        versions = _resolve_versions(r2.json())
+        for v in versions:
+            if v.get("id") == vid:
+                return vid, v.get("weights_url")
+        if versions:
+            return vid, versions[0].get("weights_url")
+        return vid, None
 
     async def predict(self, model: str, image: str | Path | bytes, *,
                       confidence: float = 0.25, iou: float = 0.45,

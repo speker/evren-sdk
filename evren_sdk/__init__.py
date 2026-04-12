@@ -21,12 +21,13 @@ from .models import (
     PredictResult,
 )
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"
 
 __all__ = [
     "EvrenClient",
     "AsyncEvrenClient",
     "EvrenCamera",
+    "InferenceWSClient",
     "draw_predictions",
     "EvrenError",
     "AuthenticationError",
@@ -47,5 +48,10 @@ __all__ = [
 
 try:
     from .edge import EvrenCamera, draw_predictions
+except ImportError:
+    pass
+
+try:
+    from .ws_client import InferenceWSClient
 except ImportError:
     pass
