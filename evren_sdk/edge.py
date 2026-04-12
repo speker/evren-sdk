@@ -12,7 +12,6 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -35,6 +34,8 @@ _PAL = [
     (130, 90, 240), (200, 140, 60), (60, 220, 170),
 ]
 
+_SENTINEL = object()
+
 
 def _require_cv2() -> None:
     if not _CV2:
@@ -48,7 +49,9 @@ def _hex_bgr(h: str) -> tuple[int, int, int]:
     return int(h[4:6], 16), int(h[2:4], 16), int(h[0:2], 16)
 
 
-def _is_normalized(bbox: list[float]) -> bool:
+def _is_normalized(bbox: list[float], fw: int, fh: int) -> bool:
+    if fw <= 1 or fh <= 1:
+        return False
     return all(0.0 <= v <= 1.0 for v in bbox[:4])
 
 
@@ -76,7 +79,7 @@ def draw_predictions(
         col = _hex_bgr(p.color) if p.color else _PAL[i % len(_PAL)]
 
         if p.bbox and len(p.bbox) >= 4:
-            norm = _is_normalized(p.bbox)
+            norm = _is_normalized(p.bbox, fw, fh)
             if norm:
                 x1 = int(p.bbox[0] * fw)
                 y1 = int(p.bbox[1] * fh)
@@ -148,7 +151,6 @@ def _hud(frame: np.ndarray, text: str) -> None:
 
 
 def _resize_for_inference(frame: np.ndarray, target: int) -> np.ndarray:
-    """Inference oncesi frame'i kucult — payload boyutunu dusurur."""
     h, w = frame.shape[:2]
     if max(h, w) <= target:
         return frame
@@ -254,6 +256,14 @@ class EvrenCamera:
             image_size=self._imgsz,
         )
 
+    def _close_ws(self) -> None:
+        if self._ws_conn:
+            try:
+                self._ws_conn.close()
+            except Exception:
+                pass
+            self._ws_conn = None
+
     # -- public api --------------------------------------------------
 
     def stream(
@@ -274,7 +284,7 @@ class EvrenCamera:
 
         self._try_ws_connect()
 
-        latest: queue.Queue[np.ndarray] = queue.Queue(maxsize=2)
+        frame_q: queue.Queue = queue.Queue(maxsize=4)
         self._stop.clear()
         is_live = self._is_live_source(source)
 
@@ -282,35 +292,38 @@ class EvrenCamera:
             while not self._stop.is_set():
                 ok, frm = cap.read()
                 if not ok:
-                    self._stop.set()
                     break
                 if is_live:
+                    # live'da sadece son frame lazim
                     try:
-                        latest.get_nowait()
+                        frame_q.get_nowait()
                     except queue.Empty:
                         pass
-                    latest.put(frm)
+                    frame_q.put(frm)
                 else:
-                    latest.put(frm, timeout=2.0)
+                    while not self._stop.is_set():
+                        try:
+                            frame_q.put(frm, timeout=0.5)
+                            break
+                        except queue.Full:
+                            continue
+            # sentinel: video bitti
+            frame_q.put(_SENTINEL)
 
         thr = threading.Thread(target=_grab, daemon=True, name="evren-capture")
         thr.start()
         min_dt = 1.0 / self._max_fps if self._max_fps > 0 else 0.0
 
-        if is_live:
-            yield from self._stream_pipeline(latest, min_dt)
-        else:
-            yield from self._stream_sequential(latest, min_dt)
-
-        self._stop.set()
-        thr.join(timeout=2)
-        cap.release()
-        if self._ws_conn:
-            try:
-                self._ws_conn.close()
-            except Exception:
-                pass
-            self._ws_conn = None
+        try:
+            if is_live:
+                yield from self._stream_pipeline(frame_q, min_dt)
+            else:
+                yield from self._stream_sequential(frame_q, min_dt)
+        finally:
+            self._stop.set()
+            thr.join(timeout=3)
+            cap.release()
+            self._close_ws()
 
     def _stream_sequential(
         self, src_q: queue.Queue, min_dt: float,
@@ -319,11 +332,17 @@ class EvrenCamera:
         fps_t = time.monotonic()
         fps_cnt = 0
 
-        while not self._stop.is_set():
+        while True:
             try:
-                frame = src_q.get(timeout=0.5)
+                item = src_q.get(timeout=1.0)
             except queue.Empty:
+                if self._stop.is_set():
+                    break
                 continue
+
+            if item is _SENTINEL:
+                break
+            frame = item
 
             now = time.monotonic()
             if now - last_ts < min_dt:
@@ -361,11 +380,13 @@ class EvrenCamera:
     def _stream_pipeline(
         self, src_q: queue.Queue, min_dt: float,
     ) -> Iterator[tuple[np.ndarray, PredictResult]]:
-        result_q: queue.Queue[PredictResult] = queue.Queue(maxsize=1)
         last_result: PredictResult | None = None
         last_ts = 0.0
         fps_t = time.monotonic()
         fps_cnt = 0
+
+        job_q: queue.Queue[bytes | None] = queue.Queue(maxsize=1)
+        result_q: queue.Queue[PredictResult] = queue.Queue(maxsize=1)
 
         def _predict_worker():
             while not self._stop.is_set():
@@ -385,16 +406,22 @@ class EvrenCamera:
                 except Exception:
                     pass
 
-        job_q: queue.Queue[bytes | None] = queue.Queue(maxsize=1)
         pred_thr = threading.Thread(target=_predict_worker, daemon=True, name="evren-predict")
         pred_thr.start()
 
         try:
-            while not self._stop.is_set():
+            first_submitted = False
+            while True:
                 try:
-                    frame = src_q.get(timeout=0.5)
+                    item = src_q.get(timeout=0.5)
                 except queue.Empty:
+                    if self._stop.is_set():
+                        break
                     continue
+
+                if item is _SENTINEL:
+                    break
+                frame = item
 
                 now = time.monotonic()
                 if now - last_ts < min_dt:
@@ -409,10 +436,20 @@ class EvrenCamera:
                     pass
                 job_q.put(buf.tobytes())
 
+                if not first_submitted:
+                    # ilk frame'de sonuc bekle
+                    try:
+                        r = result_q.get(timeout=10)
+                        last_result = r
+                        self._total_frames += 1
+                        fps_cnt += 1
+                        first_submitted = True
+                    except queue.Empty:
+                        continue
+
                 try:
                     r = result_q.get_nowait()
                     last_result = r
-                    lat = 0.0
                     self._total_frames += 1
                     fps_cnt += 1
                 except queue.Empty:
@@ -423,15 +460,14 @@ class EvrenCamera:
                 if elapsed > 2.0:
                     fps_t, fps_cnt = time.monotonic(), 0
 
-                if last_result and self._draw:
-                    draw_predictions(frame, last_result.predictions)
-                    _hud(frame, f"{last_result.count} tespit | {fps:.1f} FPS")
-
-                if last_result:
+                if last_result is not None:
+                    if self._draw:
+                        draw_predictions(frame, last_result.predictions)
+                        _hud(frame, f"{last_result.count} tespit | {fps:.1f} FPS")
                     yield frame, last_result
         finally:
             job_q.put(None)
-            pred_thr.join(timeout=2)
+            pred_thr.join(timeout=3)
 
     def run(
         self,
@@ -526,12 +562,7 @@ class EvrenCamera:
         finally:
             writer.release()
             cap.release()
-            if self._ws_conn:
-                try:
-                    self._ws_conn.close()
-                except Exception:
-                    pass
-                self._ws_conn = None
+            self._close_ws()
 
     @property
     def stats(self) -> dict[str, float]:
@@ -547,12 +578,7 @@ class EvrenCamera:
 
     def close(self) -> None:
         self.stop()
-        if self._ws_conn:
-            try:
-                self._ws_conn.close()
-            except Exception:
-                pass
-            self._ws_conn = None
+        self._close_ws()
         self._client.close()
 
     def __enter__(self) -> EvrenCamera:
