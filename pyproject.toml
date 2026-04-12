@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evren-sdk"
-version = "0.5.2"
+version = "0.5.3"
 description = "EVREN MLOps Platform — Python inference SDK for object detection, classification, and segmentation models."
-readme = "README_PYPI.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
@@ -45,9 +45,9 @@ dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 [project.urls]
 Homepage = "https://evren.ssyz.org.tr"
 Documentation = "https://docs.ssyz.org.tr/sdk"
-Repository = "https://github.com/speker/evren-sdk"
-Changelog = "https://github.com/speker/evren-sdk/blob/main/CHANGELOG.md"
-Issues = "https://github.com/speker/evren-sdk/issues"
+Repository = "https://gitlab.crudfab.com/ssb/ssyz/evren/platform"
+Changelog = "https://gitlab.crudfab.com/ssb/ssyz/evren/platform/-/blob/main/sdk/CHANGELOG.md"
+Issues = "https://gitlab.crudfab.com/ssb/ssyz/evren/platform/-/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["evren_sdk"]

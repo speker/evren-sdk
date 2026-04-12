@@ -82,6 +82,17 @@ def _raise_for(resp: httpx.Response) -> None:
     resp.raise_for_status()
 
 
+_FMT_ALIASES: dict[str, str] = {
+    "pt": "pytorch", "pth": "pytorch", "torch": "pytorch",
+    "trt": "tensorrt", "engine": "tensorrt",
+    "lite": "tflite",
+}
+
+
+def _normalize_fmt(fmt: str) -> str:
+    return _FMT_ALIASES.get(fmt.lower(), fmt.lower())
+
+
 _MIME = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".png": "image/png", ".webp": "image/webp",
@@ -154,6 +165,17 @@ def _to_model_info(m: dict) -> ModelInfo:
         id=m["id"], name=m["name"], slug=m.get("slug", ""),
         architecture=m.get("architecture"),
         owner_username=m.get("owner_username"),
+        owner_display_name=m.get("owner_display_name"),
+        description=m.get("description"),
+        modality=m.get("modality"),
+        visibility=m.get("visibility"),
+        stage=m.get("stage"),
+        stars_count=m.get("stars_count", 0),
+        forks_count=m.get("forks_count", 0),
+        downloads_count=m.get("downloads_count", 0),
+        versions_count=m.get("versions_count", 0),
+        tags=m.get("tags") or [],
+        created_at=m.get("created_at"),
     )
 
 
@@ -163,6 +185,17 @@ def _to_model_ver(v: dict) -> ModelVersion:
         weights_url=v.get("weights_url"),
         framework=v.get("framework", "pytorch"),
         metrics=v.get("metrics", {}),
+        file_size_bytes=v.get("file_size_bytes", 0),
+        onnx_url=v.get("onnx_url"),
+        tensorrt_url=v.get("tensorrt_url"),
+        tflite_url=v.get("tflite_url"),
+        job_id=v.get("job_id"),
+        dataset_name=v.get("dataset_name"),
+        training_architecture=v.get("training_architecture"),
+        training_job_name=v.get("training_job_name"),
+        gpu_count=v.get("gpu_count"),
+        training_duration_hours=v.get("training_duration_hours"),
+        created_at=v.get("created_at"),
     )
 
 
@@ -320,11 +353,11 @@ class EvrenClient:
         Args:
             model: slug veya version UUID.
             output: cikis dosya yolu.
-            fmt: "onnx", "pt", "torchscript". Varsayilan ONNX.
+            fmt: "pytorch", "onnx", "tensorrt", "tflite" veya kisa: "pt", "trt".
         """
         vid = self._vid(model)
         r = self._http.get(f"/models/versions/{vid}/download",
-                           params={"format": fmt},
+                           params={"format": _normalize_fmt(fmt)},
                            timeout=_BATCH_TIMEOUT)
         if r.status_code != 200:
             _raise_for(r)
@@ -569,7 +602,7 @@ class AsyncEvrenClient:
                              fmt: str = "onnx") -> Path:
         vid = await self._vid(model)
         r = await self._http.get(f"/models/versions/{vid}/download",
-                                 params={"format": fmt},
+                                 params={"format": _normalize_fmt(fmt)},
                                  timeout=_BATCH_TIMEOUT)
         if r.status_code != 200:
             _raise_for(r)

@@ -203,6 +203,17 @@ class ModelInfo:
     slug: str
     architecture: str | None = None
     owner_username: str | None = None
+    owner_display_name: str | None = None
+    description: str | None = None
+    modality: str | None = None
+    visibility: str | None = None
+    stage: str | None = None
+    stars_count: int = 0
+    forks_count: int = 0
+    downloads_count: int = 0
+    versions_count: int = 0
+    tags: list[str] = field(default_factory=list)
+    created_at: str | None = None
 
     @property
     def full_slug(self) -> str:
@@ -218,6 +229,17 @@ class ModelVersion:
     weights_url: str | None = None
     framework: str = "pytorch"
     metrics: dict = field(default_factory=dict)
+    file_size_bytes: int = 0
+    onnx_url: str | None = None
+    tensorrt_url: str | None = None
+    tflite_url: str | None = None
+    job_id: str | None = None
+    dataset_name: str | None = None
+    training_architecture: str | None = None
+    training_job_name: str | None = None
+    gpu_count: int | None = None
+    training_duration_hours: float | None = None
+    created_at: str | None = None
 
 
 @dataclass(slots=True)

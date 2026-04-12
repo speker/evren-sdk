@@ -13,7 +13,7 @@ class AuthenticationError(EvrenError):
 
 
 class NotFoundError(EvrenError):
-    """Belirtilen model veya versiyon bulunamadi (HTTP 404)."""
+    pass
 
 
 class RateLimitError(EvrenError):
@@ -44,4 +44,4 @@ class InsufficientCreditsError(EvrenError):
 
 
 class ValidationError(EvrenError):
-    """Istek parametrelerinde dogrulama hatasi (HTTP 422)."""
+    pass
