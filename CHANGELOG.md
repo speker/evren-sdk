@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.1] - 2026-04-12
+
+### Fixed
+- Video stream bitişinde frame kaybı — sentinel pattern ile queue drenajı
+- `_grab` thread'de `queue.Full` exception yakalanmıyor sorunu
+- `_is_normalized` artık frame boyutunu da parametre olarak alır (1x1 edge case)
+- `_stream_pipeline` ilk frame'de blocking wait ile sonuç garantisi
+- Unused `ThreadPoolExecutor` import kaldırıldı
+
 ## [0.6.0] - 2026-04-12
 
 ### Added
