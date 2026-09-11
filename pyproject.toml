@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evren-sdk"
-version = "0.7.0"
-description = "EVREN MLOps Platform — Python inference SDK for object detection, classification, and segmentation models."
+version = "0.8.0"
+description = "EVREN Yapay Zeka Platformu — Python inference SDK for object detection, classification, segmentation, and LLM chat/embedding models."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -16,7 +16,7 @@ maintainers = [
     { name = "Serkan Peker", email = "serkan.peker@crudfab.com" },
 ]
 keywords = [
-    "evren", "mlops", "inference", "object-detection",
+    "evren", "yapay-zeka", "inference", "object-detection",
     "yolo", "computer-vision", "sdk", "deep-learning",
 ]
 classifiers = [
