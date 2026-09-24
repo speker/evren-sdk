@@ -67,9 +67,9 @@ class PredictResult:
 
         Args:
             class_map: sinif_adi->index dict veya sinif listesi.
-                       None ise sinif adlari alfabetik siralanir.
+                       None ise sinif adları alfabetik sıralanır.
         Returns:
-            Her satir: ``class_id cx cy w h``
+            Her satır: ``class_id cx cy w h``
         """
         if class_map is None:
             names = sorted({p.class_name for p in self.predictions})
@@ -95,7 +95,7 @@ class PredictResult:
         return "\n".join(lines)
 
     def to_coco(self, image_id: int = 0, class_map: dict[str, int] | list[str] | None = None) -> list[dict]:
-        """COCO annotation formatinda dict listesi dondurur."""
+        """COCO annotation formatında dict listesi dondurur."""
         if class_map is None:
             names = sorted({p.class_name for p in self.predictions})
             class_map = {n: i for i, n in enumerate(names)}
@@ -120,7 +120,7 @@ class PredictResult:
         return anns
 
     def to_csv(self, sep: str = ",") -> str:
-        """CSV formatinda dondurur."""
+        """CSV formatında dondurur."""
         header = sep.join(["class_name", "confidence", "x1", "y1", "x2", "y2"])
         rows = [header]
         for p in self.predictions:
@@ -132,11 +132,11 @@ class PredictResult:
         return "\n".join(rows)
 
     def save(self, path: str | Path, fmt: str = "auto") -> None:
-        """Sonuclari dosyaya kaydet.
+        """Sonuçları dosyaya kaydet.
 
         Args:
             path: cikis dosyasi.
-            fmt: "yolo", "coco", "csv", "json" veya "auto" (uzantidan anla).
+            fmt: "yolo", "coco", "csv", "json" veya "auto" (uzantıdan anla).
         """
         p = Path(path)
         if fmt == "auto":
@@ -240,6 +240,38 @@ class ModelVersion:
     gpu_count: int | None = None
     training_duration_hours: float | None = None
     created_at: str | None = None
+
+
+@dataclass(slots=True)
+class SybilRiskResult:
+    """Sybil (LDCT akciger kanseri survival) cikarim sonucu — 6-yillik kalibre risk.
+
+    Vision Prediction/PredictResult ile KARISTIRILMAMALI — bu ayri, DICOM-hacim
+    odakli bir cikarim yolu (bkz. plan Asama 7).
+    """
+
+    id: str
+    series_id: str
+    status: str = "PENDING"
+    years: list[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6])
+    scores: list[float] | None = None
+    attention_url: str | None = None
+    error_message: str | None = None
+
+    @property
+    def is_done(self) -> bool:
+        return self.status in ("COMPLETED", "FAILED")
+
+    def year(self, n: int) -> float | None:
+        """n. yil risk skorunu dondurur (1-indexed) — scores henuz yoksa None."""
+        if not self.scores or n not in self.years:
+            return None
+        return self.scores[self.years.index(n)]
+
+    def __repr__(self) -> str:
+        if self.scores:
+            return f"<SybilRiskResult {self.status} year1={self.scores[0]:.4f}>"
+        return f"<SybilRiskResult {self.status}>"
 
 
 @dataclass(slots=True)

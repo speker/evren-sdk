@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import time
 import uuid
@@ -25,6 +26,7 @@ from .models import (
     ModelVersion,
     Prediction,
     PredictResult,
+    SybilRiskResult,
 )
 
 _API_BASE = "https://api.ssyz.org.tr/api/v1"
@@ -160,6 +162,14 @@ def _to_result(body: dict) -> PredictResult:
     )
 
 
+def _to_sybil_result(body: dict) -> SybilRiskResult:
+    return SybilRiskResult(
+        id=body["id"], series_id=body["series_id"], status=body.get("status", "PENDING"),
+        years=body.get("years", [1, 2, 3, 4, 5, 6]), scores=body.get("scores"),
+        attention_url=body.get("attention_url"), error_message=body.get("error_message"),
+    )
+
+
 def _to_model_info(m: dict) -> ModelInfo:
     return ModelInfo(
         id=m["id"], name=m["name"], slug=m.get("slug", ""),
@@ -208,7 +218,7 @@ def _resolve_versions(body: Any) -> list[dict]:
 
 def _pick_version(versions: list[dict], tag: str | None, slug: str) -> str:
     if not versions:
-        raise NotFoundError(f"'{slug}' icin versiyon yok", 404)
+        raise NotFoundError(f"'{slug}' için versiyon yok", 404)
 
     if tag is None:
         return versions[0]["id"]
@@ -216,7 +226,7 @@ def _pick_version(versions: list[dict], tag: str | None, slug: str) -> str:
     for v in versions:
         if v.get("version_tag") == tag:
             return v["id"]
-    raise NotFoundError(f"'{slug}' icin '{tag}' versiyonu yok", 404)
+    raise NotFoundError(f"'{slug}' için '{tag}' versiyonu yok", 404)
 
 
 # ---------------------------------------------------------------
@@ -269,7 +279,7 @@ class EvrenClient:
         return model if _is_uuid(model) else self.resolve(model)
 
     def resolve_ws_params(self, model: str) -> tuple[str, str | None]:
-        """WS baglantisi icin (version_id, weights_url) cozumler."""
+        """WS bağlantısı için (version_id, weights_url) çözümler."""
         vid = self._vid(model)
         slug_part = model.partition(":")[0]
         if _is_uuid(slug_part):
@@ -329,6 +339,42 @@ class EvrenClient:
         return BatchResult(results=items,
                            total_ms=body.get("total_ms", 0),
                            count=body.get("count", len(items)))
+
+    def predict_sybil(self, series_id: str, *, model_version_id: str | None = None,
+                      poll_interval: float = 5.0, timeout: float = 900.0) -> SybilRiskResult:
+        """Sybil (LDCT akciger kanseri) cikarimini baslatir ve tamamlanana kadar poll eder.
+
+        Vision predict() ile KARISTIRILMAMALI — DICOM-hacim + async Slurm job
+        gerektirir, bu yuzden tamamlanmasi dakikalar surebilir.
+
+        Args:
+            series_id: EVREN medikal seri UUID'si.
+            model_version_id: EVREN-egitilmis model — verilmezse pretrained ensemble kullanilir.
+            poll_interval: durum kontrolleri arasi bekleme (saniye).
+            timeout: toplam bekleme suresi (saniye) — asilirsa InferenceError.
+        """
+        r = self._http.post(
+            f"/medical/series/{series_id}/predict",
+            json={"model_version_id": model_version_id},
+        )
+        if r.status_code not in (200, 202):
+            _raise_for(r)
+        job = _unwrap(r.json())
+        result_id = job["id"]
+
+        start = time.monotonic()
+        while True:
+            r2 = self._http.get(f"/medical/series/{series_id}/predict/{result_id}")
+            if r2.status_code != 200:
+                _raise_for(r2)
+            result = _to_sybil_result(_unwrap(r2.json()))
+            if result.is_done:
+                return result
+            if time.monotonic() - start > timeout:
+                raise InferenceError(
+                    f"Sybil çıkarımı {timeout:.0f}s içinde tamamlanmadı (durum: {result.status})", 0,
+                )
+            time.sleep(poll_interval)
 
     def model_classes(self, model: str) -> ModelClasses:
         vid = self._vid(model)
@@ -438,7 +484,7 @@ class EvrenClient:
 
     def upload_to_dataset(self, dataset_id: str,
                           image: str | Path | bytes) -> dict:
-        """Gorseli veri setine yukler (presign -> upload -> confirm)."""
+        """Görseli veri setine yükler (presign -> upload -> confirm)."""
         import hashlib
         raw, name, mime = _read_img(image)
         sha = hashlib.sha256(raw).hexdigest()
@@ -604,6 +650,32 @@ class AsyncEvrenClient:
                            total_ms=body.get("total_ms", 0),
                            count=body.get("count", len(items)))
 
+    async def predict_sybil(self, series_id: str, *, model_version_id: str | None = None,
+                            poll_interval: float = 5.0, timeout: float = 900.0) -> SybilRiskResult:
+        """Sybil (LDCT akciger kanseri) cikarimini baslatir ve tamamlanana kadar poll eder (async)."""
+        r = await self._http.post(
+            f"/medical/series/{series_id}/predict",
+            json={"model_version_id": model_version_id},
+        )
+        if r.status_code not in (200, 202):
+            _raise_for(r)
+        job = _unwrap(r.json())
+        result_id = job["id"]
+
+        start = time.monotonic()
+        while True:
+            r2 = await self._http.get(f"/medical/series/{series_id}/predict/{result_id}")
+            if r2.status_code != 200:
+                _raise_for(r2)
+            result = _to_sybil_result(_unwrap(r2.json()))
+            if result.is_done:
+                return result
+            if time.monotonic() - start > timeout:
+                raise InferenceError(
+                    f"Sybil çıkarımı {timeout:.0f}s içinde tamamlanmadı (durum: {result.status})", 0,
+                )
+            await asyncio.sleep(poll_interval)
+
     async def model_classes(self, model: str) -> ModelClasses:
         vid = await self._vid(model)
         r = await self._http.get(f"/inference/model-classes/{vid}")
@@ -704,7 +776,7 @@ class AsyncEvrenClient:
 
     async def upload_to_dataset(self, dataset_id: str,
                                 image: str | Path | bytes) -> dict:
-        """Gorseli veri setine yukler (presign -> upload -> confirm)."""
+        """Görseli veri setine yükler (presign -> upload -> confirm)."""
         import hashlib
         raw, name, mime = _read_img(image)
         sha = hashlib.sha256(raw).hexdigest()

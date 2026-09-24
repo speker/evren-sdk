@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.0] - 2026-09-25
+
+0.8.0 PyPI'a yayınlanmadı; içeriği bu sürüme dahildir.
+
+### Added
+- `EvrenLLMClient` / `AsyncEvrenLLMClient`: EVREN LLM geçidi istemcisi — `chat`, `chat_stream`, `stream`, `embed`, `rerank`, `list_models`
+- `stream()` ayrıntılı akış: düşünme metni (`reasoning`), araç çağrıları, `finish_reason` ve son parçada token kullanımı
+- `ChatCompletionResult` alanları: `reasoning`, `tool_calls`, `finish_reason`, `id`, `meta` (`request_id`, `routed_model`, `credits_remaining`, kalan istek/token limiti)
+- Otomatik tekrar: 429/502/503/504 ve bağlantı hatalarında `Retry-After` uyumlu bekleme (`max_retries`, varsayılan 2)
+- Akışsız çağrılarda otomatik `Idempotency-Key`: tekrar denenen istek geçitte tekilleştirilir, çift ücretlendirilmez
+- `EvrenLLMError` ve alt sınıfları (`LLMRateLimitError`, `LLMNotFoundError`, `LLMAuthenticationError`, `LLMServiceError` ...): `code`, `type`, `param`, `request_id`, `retry_after`, `evren` alanları; mevcut `RateLimitError`, `NotFoundError` vb. ile uyumlu
+- `EVREN_LLM_API_KEY` / `EVREN_LLM_BASE_URL` ortam değişkenleri
+- `EvrenClient.predict_sybil()` ve `SybilRiskResult`: LDCT akciğer kanseri risk çıkarımı
+
+### Fixed
+- Düşünen modellerde `content` alanı `None` dönebiliyordu; artık her zaman `str`
+- Akış `finish_reason="error"` ile ya da `[DONE]` gelmeden kesildiğinde eksik yanıt tamamlanmış gibi dönüyordu; artık `LLMServiceError(code="stream_interrupted")` fırlatılır
+- SSE ayrıştırıcı `\r\n` ayraçlı ve çok satırlı `data:` çerçevelerini kaçırıyordu
+- LLM isteklerinde varsayılan okuma zaman aşımı 120 sn'den 600 sn'ye çıkarıldı (uzun düşünme yanıtları)
+
+### Changed
+- Sürüm tek kaynaktan okunur (`evren_sdk/_version.py`)
+
 ## [0.7.0] - 2026-04-12
 
 ### Added

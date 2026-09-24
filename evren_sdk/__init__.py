@@ -1,8 +1,9 @@
 """EVREN Python SDK — görüntü çıkarım (nesne tespiti) VE LLM sohbet/embedding
 istemcisi. `EvrenClient`/`AsyncEvrenClient` görü modelleri (`api.ssyz.org.tr`),
 `EvrenLLMClient`/`AsyncEvrenLLMClient` LLM geçidi (`evren-llmapi.ssyz.org.tr`)
-için - iki AYRI API-anahtarı sınıfı, karıştırılmamalı (t81)."""
+için - iki AYRI API-anahtarı sınıfı, karıştırılmamalı."""
 
+from ._version import __version__
 from .client import AsyncEvrenClient, EvrenClient
 from .exceptions import (
     AuthenticationError,
@@ -13,7 +14,19 @@ from .exceptions import (
     RateLimitError,
     ValidationError,
 )
-from .llm_client import AsyncEvrenLLMClient, ChatCompletionResult, ChatMessage, EvrenLLMClient
+from .llm_async_client import AsyncEvrenLLMClient
+from .llm_client import EvrenLLMClient
+from .llm_errors import (
+    EvrenLLMError,
+    LLMAuthenticationError,
+    LLMConflictError,
+    LLMInsufficientCreditsError,
+    LLMNotFoundError,
+    LLMRateLimitError,
+    LLMServiceError,
+    LLMValidationError,
+)
+from .llm_types import ChatCompletionResult, ChatDelta, ChatMessage, RerankResult, ResponseMeta
 from .models import (
     BatchResult,
     BenchmarkResult,
@@ -23,21 +36,32 @@ from .models import (
     ModelVersion,
     Prediction,
     PredictResult,
+    SybilRiskResult,
 )
 
-__version__ = "0.8.0"
-
 __all__ = [
+    "__version__",
     "EvrenClient",
     "AsyncEvrenClient",
     "EvrenLLMClient",
     "AsyncEvrenLLMClient",
     "ChatMessage",
     "ChatCompletionResult",
+    "ChatDelta",
+    "RerankResult",
+    "ResponseMeta",
     "EvrenCamera",
     "InferenceWSClient",
     "draw_predictions",
     "EvrenError",
+    "EvrenLLMError",
+    "LLMAuthenticationError",
+    "LLMConflictError",
+    "LLMInsufficientCreditsError",
+    "LLMNotFoundError",
+    "LLMRateLimitError",
+    "LLMServiceError",
+    "LLMValidationError",
     "AuthenticationError",
     "InsufficientCreditsError",
     "NotFoundError",
@@ -52,6 +76,7 @@ __all__ = [
     "ModelClasses",
     "ModelInfo",
     "ModelVersion",
+    "SybilRiskResult",
 ]
 
 try:

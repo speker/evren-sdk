@@ -28,7 +28,7 @@
 
 EVREN platformu üzerinde eğitilmiş bilgisayarlı görü modellerine Python'dan çıkarım yapmanızı sağlayan resmi SDK.
 
-**Nesne tespiti** · **Sınıflandırma** · **Segmentasyon** · **OBB** · **Keypoint** · **Edge Inference**
+**Nesne tespiti** · **Sınıflandırma** · **Segmentasyon** · **OBB** · **Keypoint** · **Edge Inference** · **LLM Geçidi**
 
 <br/>
 
@@ -207,6 +207,70 @@ asyncio.run(main())
 
 Paralel pipeline icin [`examples/07_async_pipeline.py`](examples/07_async_pipeline.py)
 
+### LLM Geçidi (Sohbet, Akış, Embedding, Rerank)
+
+`EvrenLLMClient`, EVREN LLM geçidine (`evren-llmapi.ssyz.org.tr`) bağlanır.
+Görü istemcisinden ayrıdır ve `evren_llm_...` ile başlayan LLM anahtarı kullanır.
+Anahtar verilmezse `EVREN_LLM_API_KEY` ortam değişkeninden okunur.
+
+```python
+from evren_sdk import EvrenLLMClient
+
+with EvrenLLMClient() as llm:                       # EVREN_LLM_API_KEY
+    print(llm.list_models())
+
+    r = llm.chat("glm-5.3", [{"role": "user", "content": "Merhaba"}], max_tokens=512)
+    print(r.content)          # yanıt metni (hiçbir zaman None değildir)
+    print(r.reasoning)        # düşünen modellerde düşünme metni
+    print(r.usage)            # token kullanımı
+    print(r.request_id)       # destek talebinde paylaşın
+
+    # akış — yalnızca metin
+    for parca in llm.chat_stream("deepseek-v4.1-flash", [{"role": "user", "content": "Bir şiir yaz"}]):
+        print(parca, end="", flush=True)
+
+    # akış — ayrıntılı: düşünme metni, araç çağrıları, son parçada kullanım
+    for d in llm.stream("glm-5.3", [{"role": "user", "content": "2+2?"}]):
+        if d.reasoning: ...
+        if d.content: print(d.content, end="")
+        if d.usage: print("\n", d.usage)
+
+    vektorler = llm.embed("qwen3-embedding-8b", ["merhaba", "dünya"])
+    sirali = llm.rerank("qwen3-reranker-8b", "Türkiye'nin başkenti",
+                        ["Paris Fransa'dadır", "Ankara başkenttir"], top_n=1)
+```
+
+Araç çağrısı (function calling) OpenAI biçimiyle çalışır; sonuç `r.tool_calls` alanındadır:
+
+```python
+tools = [{"type": "function", "function": {"name": "hava", "parameters": {
+    "type": "object", "properties": {"sehir": {"type": "string"}}, "required": ["sehir"]}}}]
+r = llm.chat("glm-5.3", [{"role": "user", "content": "Ankara'da hava nasıl?"}], tools=tools)
+for call in r.tool_calls:
+    print(call["function"]["name"], call["function"]["arguments"])
+```
+
+**Güvenilirlik.** 429, 502, 503, 504 ve bağlantı hatalarında istemci `Retry-After`
+başlığına uyarak otomatik tekrar dener (`max_retries=2`). Akışsız her çağrıya bir
+`Idempotency-Key` eklenir; tekrar denenen istek geçitte tekilleştirilir, çift
+çalıştırılmaz ve çift ücretlendirilmez. Akışlar yalnızca istek modele ulaşmadan
+reddedildiyse (429/503) tekrar denenir. Akış yarıda kesilirse `LLMServiceError`
+(`code="stream_interrupted"`) fırlatılır; eksik yanıt tamamlanmış gibi dönmez.
+
+```python
+from evren_sdk import EvrenLLMError, LLMRateLimitError
+
+try:
+    llm.chat("glm-5.3", mesajlar)
+except LLMRateLimitError as e:
+    print(e.retry_after, e.evren.get("resets_at"))
+except EvrenLLMError as e:
+    print(e.status_code, e.code, e.request_id, e.evren)
+```
+
+Asenkron kullanım için `AsyncEvrenLLMClient` aynı yüzeyi sunar
+(`await llm.chat(...)`, `async for parca in llm.chat_stream(...)`).
+
 ### Edge Modu (GPU'suz Cihazlar)
 
 GPU olmayan cihazlarda (Raspberry Pi, laptop, endüstriyel PC) gerçek zamanlı
@@ -331,7 +395,7 @@ except InferenceError:
 Official Python SDK for running inference on computer vision models trained on
 the EVREN platform.
 
-**Object Detection** · **Classification** · **Segmentation** · **OBB** · **Keypoint** · **Edge Inference**
+**Object Detection** · **Classification** · **Segmentation** · **OBB** · **Keypoint** · **Edge Inference** · **LLM Gateway**
 
 ### Architecture
 
@@ -500,6 +564,43 @@ asyncio.run(main())
 ```
 
 Parallel pipeline: [`examples/07_async_pipeline.py`](examples/07_async_pipeline.py)
+
+### LLM Gateway (Chat, Streaming, Embeddings, Rerank)
+
+`EvrenLLMClient` talks to the EVREN LLM gateway (`evren-llmapi.ssyz.org.tr`). It is
+separate from the vision client and uses an LLM key starting with `evren_llm_`.
+If no key is passed, `EVREN_LLM_API_KEY` is used.
+
+```python
+from evren_sdk import EvrenLLMClient
+
+with EvrenLLMClient() as llm:
+    r = llm.chat("glm-5.3", [{"role": "user", "content": "Hello"}], max_tokens=512)
+    print(r.content, r.reasoning, r.usage, r.request_id)
+
+    for chunk in llm.chat_stream("deepseek-v4.1-flash", [{"role": "user", "content": "Write a poem"}]):
+        print(chunk, end="", flush=True)
+
+    for d in llm.stream("glm-5.3", [{"role": "user", "content": "2+2?"}]):
+        ...  # d.content, d.reasoning, d.tool_calls, d.finish_reason, d.usage
+
+    vectors = llm.embed("qwen3-embedding-8b", ["hello", "world"])
+    ranked = llm.rerank("qwen3-reranker-8b", "capital of Türkiye",
+                        ["Paris is in France", "Ankara is the capital"], top_n=1)
+```
+
+Tool calls use the OpenAI format and are returned in `r.tool_calls`.
+
+**Reliability.** On 429, 502, 503, 504 and connection errors the client retries
+automatically (`max_retries=2`), honouring `Retry-After`. Every non-streaming call
+carries an `Idempotency-Key`, so a retried request is de-duplicated by the gateway
+and never executed or billed twice. Streams are retried only when the gateway
+rejected them before reaching the model (429/503). An interrupted stream raises
+`LLMServiceError` (`code="stream_interrupted"`) instead of silently returning a
+truncated answer. Errors expose `status_code`, `code`, `param`, `request_id`,
+`retry_after` and the EVREN-specific `evren` payload (`resets_at`, `suggested_models`, …).
+
+`AsyncEvrenLLMClient` offers the same API with `await` / `async for`.
 
 ### Edge Mode (GPU-free Devices)
 

@@ -1,14 +1,14 @@
-"""EVREN WebSocket inference client — gateway'e dogrudan baglanti.
+"""EVREN WebSocket inference client — gateway'e doğrudan bağlantı.
 
 Iki mod destekler:
   1. predict_frame() — senkron, tek frame gonder-al
-  2. Pipeline — submit/next_result ile multi-frame in-flight (GPU hic bos kalmaz)
+  2. Pipeline — submit/next_result ile multi-frame in-flight (GPU hiç bos kalmaz)
 
     ws = InferenceWSClient("evren_xxx", "owner/model")
     ws.connect()
     ws.start_pipeline()
     ws.submit(jpeg1)
-    ws.submit(jpeg2)       # GPU jpeg1 islerken jpeg2 kuyrukta
+    ws.submit(jpeg2)       # GPU jpeg1 işlerken jpeg2 kuyrukta
     r1 = ws.next_result()  # jpeg1 sonucu
     r2 = ws.next_result()  # jpeg2 sonucu
     ws.stop_pipeline()
@@ -114,7 +114,7 @@ class InferenceWSClient:
             from websockets.sync.client import connect as ws_connect
         except ImportError:
             raise ImportError(
-                "WebSocket modu icin websockets gerekli: "
+                "WebSocket modu için websockets gerekli: "
                 "pip install evren-sdk[edge]"
             )
 
@@ -126,7 +126,7 @@ class InferenceWSClient:
         try:
             _vid, wurl = client.resolve_ws_params(self._model)
             if not wurl:
-                raise RuntimeError(f"Model '{self._model}' icin weights_url bulunamadi")
+                raise RuntimeError(f"Model '{self._model}' için weights_url bulunamadı")
             self._weights_url = wurl
 
             try:
@@ -210,7 +210,7 @@ class InferenceWSClient:
 
     def predict_frame(self, jpeg_bytes: bytes) -> PredictResult:
         if not self._connected or self._ws is None:
-            raise RuntimeError("WS baglantisi yok — once connect() cagirin")
+            raise RuntimeError("WS bağlantısı yok — once connect() cagirin")
 
         try:
             self._ws.send(jpeg_bytes)
@@ -221,21 +221,21 @@ class InferenceWSClient:
                 self._ws.send(jpeg_bytes)
                 raw = self._ws.recv(timeout=10)
             else:
-                raise RuntimeError(f"WS baglantisi koptu: {exc}") from exc
+                raise RuntimeError(f"WS bağlantısı koptu: {exc}") from exc
 
         result = self._parse_raw(raw)
         if result is None:
             self._connected = False
             if self._reconnect():
                 return self.predict_frame(jpeg_bytes)
-            raise RuntimeError("WS session suresi doldu")
+            raise RuntimeError("WS session süresi doldu")
 
         return result
 
     # ----- pipeline API (multi-frame in-flight) -----
 
     def start_pipeline(self, max_inflight: int = 3) -> None:
-        """Send/recv thread'lerini baslat — GPU hic bos kalmaz."""
+        """Send/recv thread'lerini başlat — GPU hiç bos kalmaz."""
         if self._pipeline_on:
             return
         self._send_q = queue.Queue(maxsize=max_inflight)
@@ -281,12 +281,12 @@ class InferenceWSClient:
     def submit(self, jpeg_bytes: bytes) -> None:
         """Frame'i inference kuyruğuna gönder (non-blocking eger yer varsa)."""
         if self._send_q is None:
-            raise RuntimeError("Pipeline baslatilmadi — start_pipeline() cagir")
+            raise RuntimeError("Pipeline başlatılmadı — start_pipeline() cagir")
         self._send_q.put(jpeg_bytes, timeout=10)
 
     def next_result(self, timeout: float = 10.0) -> PredictResult | None:
         if self._recv_q is None:
-            raise RuntimeError("Pipeline baslatilmadi")
+            raise RuntimeError("Pipeline başlatılmadı")
         return self._recv_q.get(timeout=timeout)
 
     def stop_pipeline(self) -> None:

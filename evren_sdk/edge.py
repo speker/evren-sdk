@@ -1,6 +1,6 @@
-"""EVREN Edge — GPU'suz cihazlarda bulut tabanli gercek zamanli cikarim.
+"""EVREN Edge — GPU'suz cihazlarda bulut tabanlı gercek zamanlı cikarim.
 
-Kullanim:
+Kullanım:
     cam = EvrenCamera("evren_...", "owner/model")
     cam.run(0)   # webcam ac, ESC ile kapat
 
@@ -41,7 +41,7 @@ _JPARAM = [int(cv2.IMWRITE_JPEG_QUALITY), 55] if _CV2 else []
 def _require_cv2() -> None:
     if not _CV2:
         raise ImportError(
-            "Edge modulu icin opencv gerekli: pip install evren-sdk[edge]"
+            "Edge modulu için opencv gerekli: pip install evren-sdk[edge]"
         )
 
 
@@ -307,7 +307,7 @@ class EvrenCamera:
             cap.release()
             self._close_ws()
 
-    # -- WS pipeline: encode→send + recv paralel, GPU hic bos kalmaz --
+    # -- WS pipeline: encode→send + recv paralel, GPU hiç bos kalmaz --
 
     def _pipe_ws(
         self, frame_q: queue.Queue, is_live: bool,
@@ -467,7 +467,7 @@ class EvrenCamera:
         *,
         window_name: str = "EVREN Edge",
     ) -> None:
-        """Pencere acar, gercek zamanli cikarim gosterir. ESC=kapat."""
+        """Pencere acar, gercek zamanlı cikarim gösterir. ESC=kapat."""
         for frame, _ in self.stream(source):
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -545,7 +545,7 @@ class EvrenCamera:
                 if ws_ok:
                     self._ws_conn.submit(jpg)
                     pending_frames.append(frame)
-                    # drain sonuclari (non-blocking batch)
+                    # drain sonuçları (non-blocking batch)
                     while len(pending_frames) >= 3:
                         r = self._ws_conn.next_result(timeout=10)
                         pf = pending_frames.pop(0)
@@ -566,7 +566,7 @@ class EvrenCamera:
                         print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
                     writer.write(frame)
 
-            # flush kalan WS sonuclari
+            # flush kalan WS sonuçları
             if ws_ok:
                 for pf in pending_frames:
                     try:

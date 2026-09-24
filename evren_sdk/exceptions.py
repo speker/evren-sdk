@@ -9,7 +9,7 @@ class EvrenError(Exception):
 
 
 class AuthenticationError(EvrenError):
-    """Gecersiz veya suresi dolmus API anahtari (HTTP 401/403)."""
+    """Geçersiz veya süresi dolmus API anahtari (HTTP 401/403)."""
 
 
 class NotFoundError(EvrenError):
@@ -28,13 +28,13 @@ class RateLimitError(EvrenError):
 
 
 class InferenceError(EvrenError):
-    """GPU cikarim sunucusu gecici olarak kullanilamiyor (HTTP 502/503)."""
+    """GPU cikarim sunucusu geçici olarak kullanılamıyor (HTTP 502/503)."""
 
 
 class InsufficientCreditsError(EvrenError):
     """Yetersiz kredi bakiyesi (HTTP 402).
 
-    ``required`` ve ``available`` alanlari varsa kredi bilgisi icerir.
+    ``required`` ve ``available`` alanları varsa kredi bilgisi icerir.
     """
 
     def __init__(self, message: str, required: float = 0, available: float = 0) -> None:
