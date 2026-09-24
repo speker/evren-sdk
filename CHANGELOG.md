@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.2] - 2026-09-25
+
+### Changed
+- Proje tanımı "EVREN Yapay Zeka Platformu" olarak güncellendi; README girişi LLM geçidini de kapsıyor (kod değişikliği yok)
+
 ## [0.9.1] - 2026-09-25
 
 ### Fixed

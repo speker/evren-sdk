@@ -1,12 +1,12 @@
 # evren-sdk
 
-**EVREN MLOps Platform — Official Python SDK**
+**EVREN Yapay Zeka Platformu — Resmi Python SDK**
 
 [![PyPI](https://img.shields.io/pypi/v/evren-sdk?color=10b981)](https://pypi.org/project/evren-sdk/)
 [![Python](https://img.shields.io/pypi/pyversions/evren-sdk)](https://pypi.org/project/evren-sdk/)
 [![License](https://img.shields.io/github/license/speker/evren-sdk)](https://github.com/speker/evren-sdk/blob/main/LICENSE)
 
-EVREN platformunda egitilmis bilgisayarli goru modellerine Python'dan cikarim yapmanizi saglayan resmi SDK.
+EVREN Yapay Zeka Platformu'nun resmi Python SDK'sı: platformda eğitilmiş bilgisayarlı görü modelleriyle çıkarım ve EVREN LLM geçidi (sohbet, akış, embedding, rerank).
 
 **Nesne tespiti** · **Siniflandirma** · **Segmentasyon** · **OBB** · **Keypoint** · **Edge Inference**
 

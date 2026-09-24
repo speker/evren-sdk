@@ -5,7 +5,7 @@
 <h1 align="center">evren-sdk</h1>
 
 <p align="center">
-  <strong>EVREN MLOps Platform — Official Python SDK</strong>
+  <strong>EVREN Yapay Zeka Platformu — Resmi Python SDK</strong>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 ## 🇹🇷 Türkçe
 
-EVREN platformu üzerinde eğitilmiş bilgisayarlı görü modellerine Python'dan çıkarım yapmanızı sağlayan resmi SDK.
+EVREN Yapay Zeka Platformu'nun resmi Python SDK'sı: platformda eğitilmiş bilgisayarlı görü modelleriyle çıkarım ve EVREN LLM geçidi (sohbet, akış, embedding, rerank).
 
 **Nesne tespiti** · **Sınıflandırma** · **Segmentasyon** · **OBB** · **Keypoint** · **Edge Inference** · **LLM Geçidi**
 
@@ -392,8 +392,8 @@ except InferenceError:
 
 ## 🇬🇧 English
 
-Official Python SDK for running inference on computer vision models trained on
-the EVREN platform.
+Official Python SDK of the EVREN AI Platform: inference on computer vision models
+trained on EVREN and access to the EVREN LLM gateway (chat, streaming, embeddings, rerank).
 
 **Object Detection** · **Classification** · **Segmentation** · **OBB** · **Keypoint** · **Edge Inference** · **LLM Gateway**
 
