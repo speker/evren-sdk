@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1] - 2026-09-25
+
+### Fixed
+- `download_model()` ağırlık dosyası yerine sunucunun döndürdüğü bağlantı JSON'unu diske yazıyordu (ör. 382 baytlık `model.onnx`); artık `download_url` izlenir, dosya parça parça diske akıtılır ve sunucudaki gerçek dosya adı kullanılır
+- `InferenceWSClient` / `EvrenCamera` WS modu Ultralytics dışı modellerde (RF-DETR, D-FINE ...) yanlış sınıf ve kutu döndürüyordu; akış artık `/api/v1/inference/stream` üzerinden gider, framework, fold ve sınıf adları HTTP `predict()` ile aynı çözülür
+- WS pipeline sunucunun kayıpsız taşıyabileceğinden fazla kareyi yolda tutuyordu; sunucu fazlasını attığında video akışı erken bitiyor, canlı kamerada sonuçlar yanlış karelere çiziliyordu. Yoldaki kare sayısı 3 ile sınırlandı
+- Sınıflandırma modellerinde `Prediction.class_name` / `confidence` boş geliyordu; artık en olası sınıftan doldurulur (`probs` korunur, WS'de de)
+- WS akış hataları sessizce boş sonuç olarak dönüyordu; `predict_frame()` artık `InferenceError` fırlatır
+
+### Changed
+- **Güvenlik:** `EvrenClient`, `AsyncEvrenClient`, `InferenceWSClient` ve `EvrenCamera` için TLS sertifika doğrulaması varsayılan olarak açık (`verify=True`). Önceki varsayılan (`False`) API anahtarını ortadaki adam saldırısına açık bırakıyordu
+
 ## [0.9.0] - 2026-09-25
 
 0.8.0 PyPI'a yayınlanmadı; içeriği bu sürüme dahildir.

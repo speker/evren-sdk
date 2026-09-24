@@ -186,7 +186,7 @@ class EvrenCamera:
         resize: bool = True,
         mode: str = "auto",
         base_url: str = "https://api.ssyz.org.tr/api/v1",
-        verify: bool = False,
+        verify: bool = True,
     ) -> None:
         _require_cv2()
         self._client = EvrenClient(api_key=api_key, base_url=base_url, verify=verify)

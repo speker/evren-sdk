@@ -138,10 +138,21 @@ def _build_form(version_id: str, confidence: float,
     return d
 
 
+def _top1(raw: dict) -> tuple[str, float]:
+    # classify yanıtında class_name boş gelir, sonuç probs içindedir
+    name, conf = raw.get("class_name") or "", raw.get("confidence") or 0.0
+    probs = raw.get("probs") or []
+    if not name and probs:
+        best = max(probs, key=lambda p: p.get("confidence", 0.0))
+        name, conf = best.get("class_name", ""), best.get("confidence", 0.0)
+    return name, conf
+
+
 def _to_prediction(raw: dict) -> Prediction:
+    name, conf = _top1(raw)
     return Prediction(
-        class_name=raw.get("class_name", ""),
-        confidence=raw.get("confidence", 0.0),
+        class_name=name,
+        confidence=conf,
         bbox=raw.get("bbox", []),
         color=raw.get("color"),
         keypoints=raw.get("keypoints"),
@@ -216,6 +227,45 @@ def _resolve_versions(body: Any) -> list[dict]:
     return data.get("items", data.get("data", []))
 
 
+def _download_target(info: dict, output: str | Path, vid: str, fmt: str) -> tuple[str, Path]:
+    """İndirme ucu dosyayı değil `{download_url, filename}` döndürür; hedef yolu hazırlar."""
+    url = info.get("download_url")
+    if not url:
+        raise InferenceError("indirme bağlantısı alınamadı", 0)
+    dest = Path(output)
+    if dest.suffix == "":
+        dest.mkdir(parents=True, exist_ok=True)
+        dest = dest / (info.get("filename") or f"{vid}.{fmt}")
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    return url, dest
+
+
+def _same_host(url: str, base: httpx.URL) -> bool:
+    u = httpx.URL(url)
+    return not u.is_absolute_url or u.host == base.host
+
+
+def _stream_to_file(http: httpx.Client, url: str, dest: Path) -> None:
+    with http.stream("GET", url, timeout=_BATCH_TIMEOUT) as resp:
+        if resp.status_code != 200:
+            resp.read()
+            _raise_for(resp)
+        with dest.open("wb") as fh:
+            for chunk in resp.iter_bytes(1 << 20):
+                fh.write(chunk)
+
+
+async def _astream_to_file(http: httpx.AsyncClient, url: str, dest: Path) -> None:
+    async with http.stream("GET", url, timeout=_BATCH_TIMEOUT) as resp:
+        if resp.status_code != 200:
+            await resp.aread()
+            _raise_for(resp)
+        with dest.open("wb") as fh:
+            async for chunk in resp.aiter_bytes(1 << 20):
+                fh.write(chunk)
+
+
 def _pick_version(versions: list[dict], tag: str | None, slug: str) -> str:
     if not versions:
         raise NotFoundError(f"'{slug}' için versiyon yok", 404)
@@ -245,7 +295,8 @@ class EvrenClient:
     def __init__(self, api_key: str, *,
                  base_url: str = _API_BASE,
                  timeout: float = 60.0,
-                 verify: bool = False) -> None:
+                 verify: bool = True) -> None:
+        self._verify = verify
         self._http = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers=_auth_headers(api_key),
@@ -342,16 +393,16 @@ class EvrenClient:
 
     def predict_sybil(self, series_id: str, *, model_version_id: str | None = None,
                       poll_interval: float = 5.0, timeout: float = 900.0) -> SybilRiskResult:
-        """Sybil (LDCT akciger kanseri) cikarimini baslatir ve tamamlanana kadar poll eder.
+        """Sybil (LDCT akciğer kanseri) çıkarımını başlatır ve tamamlanana kadar poll eder.
 
-        Vision predict() ile KARISTIRILMAMALI — DICOM-hacim + async Slurm job
-        gerektirir, bu yuzden tamamlanmasi dakikalar surebilir.
+        Vision predict() ile KARIŞTIRILMAMALI — DICOM hacmi + asenkron Slurm işi
+        gerektirir, bu yüzden tamamlanması dakikalar sürebilir.
 
         Args:
             series_id: EVREN medikal seri UUID'si.
-            model_version_id: EVREN-egitilmis model — verilmezse pretrained ensemble kullanilir.
-            poll_interval: durum kontrolleri arasi bekleme (saniye).
-            timeout: toplam bekleme suresi (saniye) — asilirsa InferenceError.
+            model_version_id: EVREN'de eğitilmiş model — verilmezse pretrained ensemble kullanılır.
+            poll_interval: durum kontrolleri arası bekleme (saniye).
+            timeout: toplam bekleme süresi (saniye) — aşılırsa InferenceError.
         """
         r = self._http.post(
             f"/medical/series/{series_id}/predict",
@@ -430,17 +481,13 @@ class EvrenClient:
                            timeout=_BATCH_TIMEOUT)
         if r.status_code != 200:
             _raise_for(r)
-        dest = Path(output)
-        if dest.suffix == "":
-            dest.mkdir(parents=True, exist_ok=True)
-            cd = r.headers.get("content-disposition", "")
-            fname = f"{vid}.{fmt}"
-            if "filename=" in cd:
-                fname = cd.split("filename=")[-1].strip('" ')
-            dest = dest / fname
+        url, dest = _download_target(_unwrap(r.json()), output, vid, fmt)
+        # anahtar yalnızca kendi API host'umuza gider; imzalı bağlantı tek başına yeterli
+        if _same_host(url, self._http.base_url):
+            _stream_to_file(self._http, url, dest)
         else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(r.content)
+            with httpx.Client(verify=self._verify) as ext:
+                _stream_to_file(ext, url, dest)
         return dest
 
     def benchmark(self, model: str, image: str | Path | bytes, *,
@@ -502,7 +549,7 @@ class EvrenClient:
 
         if not presigned:
             return {"ok": True, "duplicate": True, "duplicates": dupes,
-                    "detail": "Gorsel zaten bu veri setinde mevcut"}
+                    "detail": "Görsel zaten bu veri setinde mevcut"}
 
         item = presigned[0]
         obj_key = item.get("object_key", item.get("key", ""))
@@ -558,7 +605,8 @@ class AsyncEvrenClient:
     def __init__(self, api_key: str, *,
                  base_url: str = _API_BASE,
                  timeout: float = 60.0,
-                 verify: bool = False) -> None:
+                 verify: bool = True) -> None:
+        self._verify = verify
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers=_auth_headers(api_key),
@@ -652,7 +700,7 @@ class AsyncEvrenClient:
 
     async def predict_sybil(self, series_id: str, *, model_version_id: str | None = None,
                             poll_interval: float = 5.0, timeout: float = 900.0) -> SybilRiskResult:
-        """Sybil (LDCT akciger kanseri) cikarimini baslatir ve tamamlanana kadar poll eder (async)."""
+        """Sybil (LDCT akciğer kanseri) çıkarımını başlatır ve tamamlanana kadar poll eder (async)."""
         r = await self._http.post(
             f"/medical/series/{series_id}/predict",
             json={"model_version_id": model_version_id},
@@ -723,17 +771,12 @@ class AsyncEvrenClient:
                                  timeout=_BATCH_TIMEOUT)
         if r.status_code != 200:
             _raise_for(r)
-        dest = Path(output)
-        if dest.suffix == "":
-            dest.mkdir(parents=True, exist_ok=True)
-            cd = r.headers.get("content-disposition", "")
-            fname = f"{vid}.{fmt}"
-            if "filename=" in cd:
-                fname = cd.split("filename=")[-1].strip('" ')
-            dest = dest / fname
+        url, dest = _download_target(_unwrap(r.json()), output, vid, fmt)
+        if _same_host(url, self._http.base_url):
+            await _astream_to_file(self._http, url, dest)
         else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(r.content)
+            async with httpx.AsyncClient(verify=self._verify) as ext:
+                await _astream_to_file(ext, url, dest)
         return dest
 
     async def benchmark(self, model: str, image: str | Path | bytes, *,
@@ -794,7 +837,7 @@ class AsyncEvrenClient:
 
         if not presigned:
             return {"ok": True, "duplicate": True, "duplicates": dupes,
-                    "detail": "Gorsel zaten bu veri setinde mevcut"}
+                    "detail": "Görsel zaten bu veri setinde mevcut"}
 
         item = presigned[0]
         obj_key = item.get("object_key", item.get("key", ""))
