@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.10.0] - 2026-10-10
+
+### Added
+- `decide()` / `decide_batch()`: tipli karar modelleri (`laya`, `clef`) — `/v1/systemone`. `DecisionResult` üzerinde `choice()`, `noul()`, `score()`, `probabilities()` yardımcıları
+- `decide(images=[...])`: clef için görsel girdi (en fazla 4); `encode_image(kaynak, max_side=1024)` yol, bayt ya da `data:` URL'yi gömülü biçime çevirir, istenirse küçültür (`pip install evren-sdk[images]`)
+- `ocr()` (`/v1/ocr`), `transcribe()` (`/v1/audio/transcriptions`; json, text, srt, verbose_json, diarized_json)
+- `respond()` / `get_response()`: Responses API (akışsız, `previous_response_id` ile zincirleme); `ResponseResult.output_text`
+- `models()`: `/v1/models` kayıtlarını görev (`task`), modalite ve fiyat bilgisiyle döner (`list_models()` yalnız ad döndürmeye devam eder)
+- `quota()` (5 dk pencere, günlük tavan, kredi) ve `request_status()` (yürütme/ücret durumu)
+- Hepsi `AsyncEvrenLLMClient` üzerinde de mevcut
+
+### Fixed
+- Günlük kota dolduğunda geçit `Retry-After` değerini gün sonuna kadar verir; istemci bunu 30 sn ile sınırlayıp iki kez daha deniyor ve hatayı ~1 dk geç bildiriyordu. Artık 30 sn'den uzun bekleme isteyen yanıtlar tekrar denenmez
+- `EvrenClient`: `Retry-After` HTTP tarihi biçiminde gelirse 429 işlenirken `ValueError` oluşuyordu
+- `InferenceWSClient`: bozuk JSON karesi alma iş parçacığını sessizce durduruyor, sonraki tüm sonuçlar zaman aşımına düşüyordu; artık hatalı kare boş sonuçla yer tutar
+- `InferenceWSClient`: bağlantı kurulmadan çağrılan iç yollar `NoneType` hatası veriyordu; açık `RuntimeError` döner
+- `EvrenCamera.record()`: WS sonucu 10 sn içinde gelmezse kayıt `queue.Empty` ile yarıda kesiliyordu; kare kutusuz yazılıp devam edilir
+- `EvrenCamera`: çıkarım hataları `print()` ile stderr'e basılıyordu; artık `logging` (`evren_sdk.edge`) kullanılır
+
+### Changed
+- PyPI bağlantıları (depo, değişiklik günlüğü, hata kayıtları, belgeler) herkese açık GitHub deposuna yönlendirildi; eski bağlantılar özel sunucuya gidiyordu
+- Görü istemcisi, edge ve WS modülleri `mypy --strict` ve ruff ile temizlendi; yeni opsiyonel bağımlılık grubu `images` (Pillow)
+
 ## [0.9.2] - 2026-09-25
 
 ### Changed

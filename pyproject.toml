@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "evren-sdk"
 dynamic = ["version"]
-description = "EVREN Yapay Zeka Platformu — Python SDK for the EVREN LLM gateway (chat, streaming, embeddings, rerank) and vision inference (detection, classification, segmentation)."
+description = "EVREN Yapay Zeka Platformu — Python SDK for the EVREN LLM gateway (chat, streaming, embeddings, rerank, typed decisions, OCR, speech-to-text) and vision inference (detection, classification, segmentation)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -19,6 +19,7 @@ keywords = [
     "evren", "yapay-zeka", "inference", "object-detection",
     "yolo", "computer-vision", "sdk", "deep-learning",
     "llm", "openai-compatible", "embeddings", "rerank",
+    "decision-model", "ocr", "speech-to-text",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -41,17 +42,22 @@ dependencies = [
 
 [project.optional-dependencies]
 edge = ["opencv-python>=4.8", "websockets>=12.0"]
-dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
+images = ["Pillow>=10"]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy", "Pillow>=10"]
 
 [project.urls]
 Homepage = "https://evren.ssyz.org.tr"
-Documentation = "https://docs.ssyz.org.tr/sdk"
-Repository = "https://gitlab.crudfab.com/ssb/ssyz/evren/platform"
-Changelog = "https://gitlab.crudfab.com/ssb/ssyz/evren/platform/-/blob/main/sdk/CHANGELOG.md"
-Issues = "https://gitlab.crudfab.com/ssb/ssyz/evren/platform/-/issues"
+Documentation = "https://github.com/speker/evren-sdk#readme"
+Repository = "https://github.com/speker/evren-sdk"
+Changelog = "https://github.com/speker/evren-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/speker/evren-sdk/issues"
 
 [tool.hatch.version]
 path = "evren_sdk/_version.py"
+
+[tool.hatch.build]
+# monorepo .gitignore'daki `_*.py` kuralı _version.py'yi derlemeden düşürüyordu
+artifacts = ["evren_sdk/_version.py"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["evren_sdk"]
@@ -60,6 +66,15 @@ packages = ["evren_sdk"]
 target-version = "py310"
 line-length = 100
 
+[tool.ruff.lint]
+# typing.Self 3.11+; paket 3.10'u destekliyor
+extend-ignore = ["PYI034"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = true
+
+# opsiyonel bağımlılıklar (edge, images) kurulu olmayabilir
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "numpy", "numpy.*", "PIL", "PIL.*", "websockets", "websockets.*"]
+ignore_missing_imports = true

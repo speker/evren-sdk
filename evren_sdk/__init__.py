@@ -1,7 +1,8 @@
-"""EVREN Python SDK — görüntü çıkarım (nesne tespiti) VE LLM sohbet/embedding
-istemcisi. `EvrenClient`/`AsyncEvrenClient` görü modelleri (`api.ssyz.org.tr`),
-`EvrenLLMClient`/`AsyncEvrenLLMClient` LLM geçidi (`evren-llmapi.ssyz.org.tr`)
-için - iki AYRI API-anahtarı sınıfı, karıştırılmamalı."""
+"""EVREN Python SDK — görüntü çıkarım (nesne tespiti) VE LLM geçidi istemcisi
+(sohbet, embedding, rerank, tipli karar, OCR, ses transkripsiyonu). `EvrenClient`/
+`AsyncEvrenClient` görü modelleri (`api.ssyz.org.tr`), `EvrenLLMClient`/
+`AsyncEvrenLLMClient` LLM geçidi (`evren-llmapi.ssyz.org.tr`) için - iki AYRI
+API-anahtarı sınıfı, karıştırılmamalı."""
 
 from ._version import __version__
 from .client import AsyncEvrenClient, EvrenClient
@@ -26,6 +27,17 @@ from .llm_errors import (
     LLMServiceError,
     LLMValidationError,
 )
+from .llm_media import encode_image
+from .llm_tasks import (
+    DecisionBatchResult,
+    DecisionResult,
+    LLMModel,
+    OcrResult,
+    QuotaStatus,
+    RequestStatus,
+    ResponseResult,
+    Transcription,
+)
 from .llm_types import ChatCompletionResult, ChatDelta, ChatMessage, RerankResult, ResponseMeta
 from .models import (
     BatchResult,
@@ -40,43 +52,52 @@ from .models import (
 )
 
 __all__ = [
-    "__version__",
-    "EvrenClient",
     "AsyncEvrenClient",
-    "EvrenLLMClient",
     "AsyncEvrenLLMClient",
-    "ChatMessage",
+    "AuthenticationError",
+    "BatchResult",
+    "BenchmarkResult",
     "ChatCompletionResult",
     "ChatDelta",
-    "RerankResult",
-    "ResponseMeta",
+    "ChatMessage",
+    "ClassInfo",
+    "DecisionBatchResult",
+    "DecisionResult",
     "EvrenCamera",
-    "InferenceWSClient",
-    "draw_predictions",
+    "EvrenClient",
     "EvrenError",
+    "EvrenLLMClient",
     "EvrenLLMError",
+    "InferenceError",
+    "InferenceWSClient",
+    "InsufficientCreditsError",
     "LLMAuthenticationError",
     "LLMConflictError",
     "LLMInsufficientCreditsError",
+    "LLMModel",
     "LLMNotFoundError",
     "LLMRateLimitError",
     "LLMServiceError",
     "LLMValidationError",
-    "AuthenticationError",
-    "InsufficientCreditsError",
-    "NotFoundError",
-    "RateLimitError",
-    "InferenceError",
-    "ValidationError",
-    "Prediction",
-    "PredictResult",
-    "BatchResult",
-    "BenchmarkResult",
-    "ClassInfo",
     "ModelClasses",
     "ModelInfo",
     "ModelVersion",
+    "NotFoundError",
+    "OcrResult",
+    "PredictResult",
+    "Prediction",
+    "QuotaStatus",
+    "RateLimitError",
+    "RequestStatus",
+    "RerankResult",
+    "ResponseMeta",
+    "ResponseResult",
     "SybilRiskResult",
+    "Transcription",
+    "ValidationError",
+    "__version__",
+    "draw_predictions",
+    "encode_image",
 ]
 
 try:

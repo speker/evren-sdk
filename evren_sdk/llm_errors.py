@@ -46,7 +46,7 @@ class EvrenLLMError(EvrenError):
         status_code: int | None = None,
         *,
         code: str | None = None,
-        type: str | None = None,  # noqa: A002 - OpenAI alan adı
+        type: str | None = None,
         param: str | None = None,
         evren: dict[str, Any] | None = None,
         request_id: str | None = None,

@@ -56,4 +56,30 @@ def interpret(payload: str, request_id: str | None) -> ChatDelta | object | None
     return delta
 
 
-__all__ = ["DONE", "EvrenLLMError", "SSEBuffer", "interpret"]
+class StreamDrain:
+    """Ham baytları `ChatDelta`'ya çevirir; akışın eksik bittiğini fark eder."""
+
+    def __init__(self, request_id: str | None) -> None:
+        self._buf = SSEBuffer()
+        self._rid = request_id
+        self.done = False
+        self._finished = False
+
+    def feed(self, raw: bytes) -> Iterator[ChatDelta]:
+        # generator: aynı pakette hata kapanışı gelse de önceki parçalar kullanıcıya ulaşır
+        for payload in self._buf.feed(raw):
+            item = interpret(payload, self._rid)
+            if item is DONE:
+                self.done = True
+                return
+            if isinstance(item, ChatDelta):
+                self._finished = self._finished or item.finish_reason is not None
+                yield item
+
+    def close(self) -> None:
+        # ne [DONE] ne finish_reason geldiyse bağlantı erken kapanmıştır
+        if not self.done and not self._finished:
+            raise stream_error(None, self._rid)
+
+
+__all__ = ["DONE", "EvrenLLMError", "SSEBuffer", "StreamDrain", "interpret"]

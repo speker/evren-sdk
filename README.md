@@ -207,7 +207,7 @@ asyncio.run(main())
 
 Paralel pipeline icin [`examples/07_async_pipeline.py`](examples/07_async_pipeline.py)
 
-### LLM Geçidi (Sohbet, Akış, Embedding, Rerank)
+### LLM Geçidi (Sohbet, Akış, Embedding, Rerank, Karar, OCR, Ses)
 
 `EvrenLLMClient`, EVREN LLM geçidine (`evren-llmapi.ssyz.org.tr`) bağlanır.
 Görü istemcisinden ayrıdır ve `evren_llm_...` ile başlayan LLM anahtarı kullanır.
@@ -256,6 +256,8 @@ başlığına uyarak otomatik tekrar dener (`max_retries=2`). Akışsız her ça
 çalıştırılmaz ve çift ücretlendirilmez. Akışlar yalnızca istek modele ulaşmadan
 reddedildiyse (429/503) tekrar denenir. Akış yarıda kesilirse `LLMServiceError`
 (`code="stream_interrupted"`) fırlatılır; eksik yanıt tamamlanmış gibi dönmez.
+Günlük kota dolduğunda geçit `Retry-After` değerini gün sonuna kadar verir; bu
+durumda (30 sn'den uzun bekleme) tekrar denenmez, `LLMRateLimitError` hemen döner.
 
 ```python
 from evren_sdk import EvrenLLMError, LLMRateLimitError
@@ -270,6 +272,56 @@ except EvrenLLMError as e:
 
 Asenkron kullanım için `AsyncEvrenLLMClient` aynı yüzeyi sunar
 (`await llm.chat(...)`, `async for parca in llm.chat_stream(...)`).
+
+### Tipli Karar, OCR, Ses ve Kota
+
+Karar modelleri (`laya`, `clef`) metin üretmez; bir metin (ve clef'te görsel) için
+tanımladığınız `choice`, `score` ve `noul` (evet/hayır) sorularını tek geçişte
+olasılıklarıyla yanıtlar. Hangi modelin hangi işi yaptığı `llm.models()` içindeki
+`task` alanında yazar (`decision`, `ocr`, `audio_transcription` ...). Laya her
+soruda `instructions` ister; iki modelde de çalışması için her soruya yazın.
+
+```python
+from evren_sdk import EvrenLLMClient, encode_image
+
+with EvrenLLMClient() as llm:
+    r = llm.decide("clef", "Faturamdan iki kez ücret çekildi, iade etmezseniz iptal edeceğim.", {
+        "birim": {"type": "choice", "instructions": "Hangi birim?",
+                  "criteria": {"fatura": "ödeme, iade", "teknik": "hata, kesinti"}},
+        "aciliyet": {"type": "score", "instructions": "Ne kadar acil?",
+                     "criteria": ["acil değil", "yakında", "kritik"]},
+        "iptal": {"type": "noul", "instructions": "İptal tehdidi var mı?"},
+    })
+    print(r.choice("birim"), r.score("aciliyet"), r.noul("iptal"), r.probabilities("birim"))
+
+    # clef görsel de okur (en fazla 4). Görsel küçültülmeden okunur: 32×32 piksellik
+    # her karo 1 token (1024 px ≈ 1.000, 4000 px ≈ 15.600) — büyük fotoğrafı küçültün:
+    belge = encode_image("fatura.jpg", max_side=1024)   # pip install evren-sdk[images]
+    r = llm.decide("clef", "Ekteki belgeyi incele.", {
+        "okunakli": {"type": "noul", "instructions": "Toplam tutar okunaklı mı?"},
+    }, images=[belge])
+
+    # laya: aynı soruları 64 metne tek çağrıda (clef'te toplu uç yok)
+    toplu = llm.decide_batch("laya", ["Şifremi unuttum", "Fiyat teklifi istiyorum"], {
+        "birim": {"type": "choice", "instructions": "Hangi birim?",
+                  "criteria": {"teknik": "giriş, hata", "satis": "fiyat, paket"}},
+    })
+    print([x.choice("birim") for x in toplu.results])
+
+    print(llm.ocr("dots-ocr", "fis.png").text)                       # görselden metin
+    print(llm.transcribe("qwen3-asr-1.7b", "toplanti.wav", language="tr").text)
+    altyazi = llm.transcribe("qwen3-asr-1.7b", "video.mp3", response_format="srt").text
+
+    q = llm.quota()        # 5 dk pencere, günlük tavan, kredi
+    print(q.level, q.daily_remaining_tokens, q.remaining_cr)
+
+    yanit = llm.respond("glm-5.3", "Türkiye'nin başkenti?")          # Responses API
+    devam = llm.respond("glm-5.3", "Nüfusu?", previous_response_id=yanit.id)
+    print(devam.output_text)
+```
+
+Ses ucunda geçit `Idempotency-Key` desteklemediği için `transcribe()` yalnızca
+bağlantı hiç kurulamadıysa tekrar denenir.
 
 ### Edge Modu (GPU'suz Cihazlar)
 
@@ -385,6 +437,29 @@ except InferenceError:
 | `upload_to_dataset(dataset_id, image)` | Veri setine görsel yükle |
 
 `AsyncEvrenClient` aynı API'yi `async/await` ile sunar.
+
+</details>
+
+<details>
+<summary><strong>LLM İstemcisi Metotları</strong></summary>
+
+| Metot | Uç | Dönüş |
+|---|---|---|
+| `chat(model, messages, **kw)` | `/v1/chat/completions` | `ChatCompletionResult` |
+| `stream()` / `chat_stream()` | `/v1/chat/completions` (SSE) | `ChatDelta` / `str` |
+| `embed(model, texts)` | `/v1/embeddings` | `list[list[float]]` |
+| `rerank(model, query, documents, top_n)` | `/v1/rerank` | `list[RerankResult]` |
+| `decide(model, state, questions, images=)` | `/v1/systemone` | `DecisionResult` |
+| `decide_batch(model, states, questions)` | `/v1/systemone/batch` | `DecisionBatchResult` |
+| `ocr(model, image)` | `/v1/ocr` | `OcrResult` |
+| `transcribe(model, audio, response_format=)` | `/v1/audio/transcriptions` | `Transcription` |
+| `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
+| `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
+| `quota()` | `/v1/quota` | `QuotaStatus` |
+| `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
+
+`encode_image(kaynak, max_side=None)` yol, bayt ya da `data:` URL'yi geçidin kabul
+ettiği gömülü biçime çevirir.
 
 </details>
 
@@ -565,7 +640,7 @@ asyncio.run(main())
 
 Parallel pipeline: [`examples/07_async_pipeline.py`](examples/07_async_pipeline.py)
 
-### LLM Gateway (Chat, Streaming, Embeddings, Rerank)
+### LLM Gateway (Chat, Streaming, Embeddings, Rerank, Decisions, OCR, Speech)
 
 `EvrenLLMClient` talks to the EVREN LLM gateway (`evren-llmapi.ssyz.org.tr`). It is
 separate from the vision client and uses an LLM key starting with `evren_llm_`.
@@ -599,8 +674,52 @@ rejected them before reaching the model (429/503). An interrupted stream raises
 `LLMServiceError` (`code="stream_interrupted"`) instead of silently returning a
 truncated answer. Errors expose `status_code`, `code`, `param`, `request_id`,
 `retry_after` and the EVREN-specific `evren` payload (`resets_at`, `suggested_models`, …).
+When the daily quota is exhausted the gateway sets `Retry-After` to the end of the
+day; such responses (wait longer than 30 s) are not retried and
+`LLMRateLimitError` is raised immediately.
 
 `AsyncEvrenLLMClient` offers the same API with `await` / `async for`.
+
+### Typed Decisions, OCR, Speech-to-Text and Quota
+
+Decision models (`laya`, `clef`) do not generate text: they answer typed
+`choice`, `score` and `noul` (yes/no) questions about a text (and, with clef,
+images) in a single pass, with probabilities. `llm.models()` reports each model's
+`task` (`decision`, `ocr`, `audio_transcription`, …). Laya requires `instructions`
+on every question; include it so the same questions work on both models.
+
+```python
+from evren_sdk import EvrenLLMClient, encode_image
+
+with EvrenLLMClient() as llm:
+    r = llm.decide("clef", "I was charged twice; refund it or I will cancel.", {
+        "team": {"type": "choice", "instructions": "Which team?",
+                 "criteria": {"billing": "payments, refunds", "tech": "bugs, outages"}},
+        "urgency": {"type": "score", "instructions": "How urgent?", "criteria": ["can wait", "soon", "critical"]},
+        "churn": {"type": "noul", "instructions": "Does the customer threaten to cancel?"},
+    })
+    print(r.choice("team"), r.score("urgency"), r.noul("churn"))
+
+    # clef reads up to 4 images, without downscaling: every 32×32 px tile is one
+    # token (1024 px ≈ 1,000, 4000 px ≈ 15,600) — shrink large photos first:
+    doc = encode_image("invoice.jpg", max_side=1024)    # pip install evren-sdk[images]
+    r = llm.decide("clef", "Inspect the attached document.", {
+        "legible": {"type": "noul", "instructions": "Is the total legible?"},
+    }, images=[doc])
+
+    batch = llm.decide_batch("laya", ["I forgot my password", "Send me a quote"], {
+        "team": {"type": "choice", "instructions": "Which team?", "criteria": {"tech": "login", "sales": "pricing"}},
+    })                                                  # laya only; clef has no batch endpoint
+
+    print(llm.ocr("dots-ocr", "receipt.png").text)
+    print(llm.transcribe("qwen3-asr-1.7b", "meeting.wav", language="tr").text)
+    print(llm.quota().daily_remaining_tokens)
+    first = llm.respond("glm-5.3", "Capital of Türkiye?")             # Responses API
+    print(llm.respond("glm-5.3", "Population?", previous_response_id=first.id).output_text)
+```
+
+The gateway does not accept `Idempotency-Key` on the audio endpoint, so
+`transcribe()` is retried only when the connection could not be established.
 
 ### Edge Mode (GPU-free Devices)
 
@@ -715,6 +834,29 @@ except InferenceError:
 
 </details>
 
+<details>
+<summary><strong>LLM Client Methods</strong></summary>
+
+| Method | Endpoint | Returns |
+|---|---|---|
+| `chat(model, messages, **kw)` | `/v1/chat/completions` | `ChatCompletionResult` |
+| `stream()` / `chat_stream()` | `/v1/chat/completions` (SSE) | `ChatDelta` / `str` |
+| `embed(model, texts)` | `/v1/embeddings` | `list[list[float]]` |
+| `rerank(model, query, documents, top_n)` | `/v1/rerank` | `list[RerankResult]` |
+| `decide(model, state, questions, images=)` | `/v1/systemone` | `DecisionResult` |
+| `decide_batch(model, states, questions)` | `/v1/systemone/batch` | `DecisionBatchResult` |
+| `ocr(model, image)` | `/v1/ocr` | `OcrResult` |
+| `transcribe(model, audio, response_format=)` | `/v1/audio/transcriptions` | `Transcription` |
+| `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
+| `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
+| `quota()` | `/v1/quota` | `QuotaStatus` |
+| `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
+
+`encode_image(source, max_side=None)` turns a path, bytes or `data:` URL into the
+embedded form the gateway accepts.
+
+</details>
+
 ---
 
 ## Examples
@@ -736,6 +878,7 @@ except InferenceError:
 - Python >= 3.10
 - [httpx](https://www.python-httpx.org/) >= 0.27
 - [opencv-python](https://pypi.org/project/opencv-python/) >= 4.8 *(only for `evren-sdk[edge]`)*
+- [Pillow](https://pypi.org/project/pillow/) >= 10 *(only for `encode_image(max_side=...)`, `evren-sdk[images]`)*
 
 ## License
 

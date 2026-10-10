@@ -29,7 +29,10 @@ _BASE_S = 0.5
 _CAP_S = 8.0
 
 
-def should_retry_status(status: int, *, stream: bool) -> bool:
+def should_retry_status(status: int, *, stream: bool, retry_after: float | None = None) -> bool:
+    # günlük kota dolunca geçit Retry-After'ı gün sonuna kadar verir; o hatayı beklemek anlamsız
+    if retry_after is not None and retry_after > MAX_RETRY_AFTER_S:
+        return False
     return status in (STREAM_RETRY_STATUSES if stream else RETRY_STATUSES)
 
 
@@ -44,4 +47,4 @@ def backoff(attempt: int, retry_after: float | None) -> float:
     if retry_after is not None:
         return min(retry_after, MAX_RETRY_AFTER_S)
     base: float = min(_CAP_S, _BASE_S * float(2**attempt))
-    return base * (0.5 + random.random() / 2)  # noqa: S311 - jitter, kriptografik değil
+    return base * (0.5 + random.random() / 2)
