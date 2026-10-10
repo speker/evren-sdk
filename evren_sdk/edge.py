@@ -1,4 +1,4 @@
-"""EVREN Edge — GPU'suz cihazlarda bulut tabanlı gercek zamanlı cikarim.
+"""EVREN Edge — GPU'suz cihazlarda bulut tabanlı gerçek zamanlı çıkarım.
 
 Kullanım:
     cam = EvrenCamera("evren_...", "owner/model")
@@ -9,17 +9,27 @@ Kullanım:
 """
 from __future__ import annotations
 
+import contextlib
+import logging
 import queue
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from .client import EvrenClient
+from .exceptions import EvrenError
 from .models import Prediction, PredictResult
 
 if TYPE_CHECKING:
     import numpy as np
+
+    from .ws_client import InferenceWSClient
+
+log = logging.getLogger(__name__)
 
 try:
     import cv2
@@ -41,7 +51,7 @@ _JPARAM = [int(cv2.IMWRITE_JPEG_QUALITY), 55] if _CV2 else []
 def _require_cv2() -> None:
     if not _CV2:
         raise ImportError(
-            "Edge modulu için opencv gerekli: pip install evren-sdk[edge]"
+            "Edge modülü için opencv gerekli: pip install evren-sdk[edge]"
         )
 
 
@@ -165,11 +175,9 @@ class EvrenCamera:
     """
 
     __slots__ = (
-        "_client", "_model", "_conf", "_iou", "_imgsz",
-        "_max_fps", "_jpeg_q", "_draw", "_resize",
-        "_stop", "_total_frames", "_total_lat",
-        "_mode", "_api_key", "_base_url", "_verify",
-        "_ws_conn",
+        "_api_key", "_base_url", "_client", "_conf", "_draw", "_imgsz", "_iou",
+        "_jpeg_q", "_max_fps", "_mode", "_model", "_resize", "_stop",
+        "_total_frames", "_total_lat", "_verify", "_ws_conn",
     )
 
     def __init__(
@@ -202,7 +210,7 @@ class EvrenCamera:
         self._api_key = api_key
         self._base_url = base_url
         self._verify = verify
-        self._ws_conn = None
+        self._ws_conn: InferenceWSClient | None = None
         self._stop = threading.Event()
         self._total_frames = 0
         self._total_lat = 0.0
@@ -211,30 +219,32 @@ class EvrenCamera:
         if isinstance(source, int):
             return True
         s = str(source).lower()
-        return s.startswith("rtsp://") or s.startswith("http://") or s.startswith("https://")
+        return s.startswith(("rtsp://", "http://", "https://"))
 
-    def _try_ws(self) -> bool:
+    def _try_ws(self) -> InferenceWSClient | None:
+        """WS bağlantısı kurar; `auto` modda kurulamazsa None döner ve HTTP'ye düşülür."""
         if self._mode == "http":
-            return False
+            return None
+        from .ws_client import InferenceWSClient
+        ws = InferenceWSClient(
+            api_key=self._api_key,
+            model=self._model,
+            confidence=self._conf,
+            iou=self._iou,
+            image_size=self._imgsz,
+            base_url=self._base_url,
+            verify=self._verify,
+        )
         try:
-            from .ws_client import InferenceWSClient
-            ws = InferenceWSClient(
-                api_key=self._api_key,
-                model=self._model,
-                confidence=self._conf,
-                iou=self._iou,
-                image_size=self._imgsz,
-                base_url=self._base_url,
-                verify=self._verify,
-            )
             ws.connect()
-            self._ws_conn = ws
-            return True
-        except Exception:
+        except Exception as exc:
             self._ws_conn = None
             if self._mode == "ws":
                 raise
-            return False
+            log.info("WS unavailable, falling back to HTTP: %s", exc)
+            return None
+        self._ws_conn = ws
+        return ws
 
     def _encode(self, frame: np.ndarray) -> bytes:
         small = _resize_for_inference(frame, self._imgsz) if self._resize else frame
@@ -246,10 +256,9 @@ class EvrenCamera:
 
     def _close_ws(self) -> None:
         if self._ws_conn:
-            try:
+            # kapanış hatası kullanıcıya yansıtılmaz
+            with contextlib.suppress(Exception):
                 self._ws_conn.close()
-            except Exception:
-                pass
             self._ws_conn = None
 
     # -- public api --------------------------------------------------
@@ -258,22 +267,22 @@ class EvrenCamera:
         self,
         source: int | str = 0,
     ) -> Iterator[tuple[np.ndarray, PredictResult]]:
-        """Frame-by-frame cikarim — her zaman pipeline modu.
+        """Kare kare çıkarım — her zaman pipeline modu.
 
         Yields:
             (frame_bgr, PredictResult) — draw=True ise frame annotated.
         """
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
-            raise RuntimeError(f"Kaynak acilamadi: {source}")
+            raise RuntimeError(f"Kaynak açılamadı: {source}")
 
-        ws_ok = self._try_ws()
+        ws = self._try_ws()
         is_live = self._is_live(source)
         self._stop.clear()
 
-        frame_q: queue.Queue = queue.Queue(maxsize=8)
+        frame_q: queue.Queue[Any] = queue.Queue(maxsize=8)
 
-        def _grab():
+        def _grab() -> None:
             while not self._stop.is_set():
                 ok, frm = cap.read()
                 if not ok:
@@ -297,8 +306,8 @@ class EvrenCamera:
         cap_thr.start()
 
         try:
-            if ws_ok:
-                yield from self._pipe_ws(frame_q, is_live)
+            if ws is not None:
+                yield from self._pipe_ws(ws, frame_q, is_live)
             else:
                 yield from self._pipe_http(frame_q, is_live)
         finally:
@@ -307,18 +316,17 @@ class EvrenCamera:
             cap.release()
             self._close_ws()
 
-    # -- WS pipeline: encode→send + recv paralel, GPU hiç bos kalmaz --
+    # -- WS pipeline: encode→send + recv paralel, GPU hiç boş kalmaz --
 
     def _pipe_ws(
-        self, frame_q: queue.Queue, is_live: bool,
+        self, ws: InferenceWSClient, frame_q: queue.Queue[Any], is_live: bool,
     ) -> Iterator[tuple[np.ndarray, PredictResult]]:
-        ws = self._ws_conn
         ws.start_pipeline(max_inflight=3)
 
-        pending: queue.Queue = queue.Queue(maxsize=6)
+        pending: queue.Queue[Any] = queue.Queue(maxsize=6)
         min_dt = 1.0 / self._max_fps if self._max_fps > 0 else 0.0
 
-        def _encode_submit():
+        def _encode_submit() -> None:
             last_ts = 0.0
             while not self._stop.is_set():
                 try:
@@ -332,16 +340,16 @@ class EvrenCamera:
                     break
 
                 now = time.monotonic()
-                if now - last_ts < min_dt:
-                    if is_live:
-                        continue
+                if now - last_ts < min_dt and is_live:
+                    continue
                 jpg = self._encode(item)
                 last_ts = time.monotonic()
 
                 try:
                     ws.submit(jpg)
                     pending.put(item)
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - gönderim hatası akışı bitirir, ana döngü sentinel bekler
+                    log.warning("WS frame submit failed: %s", exc)
                     pending.put(_SENTINEL)
                     break
 
@@ -386,15 +394,15 @@ class EvrenCamera:
             ws.stop_pipeline()
             enc_thr.join(timeout=3)
 
-    # -- HTTP pipeline: encode+predict ayri thread, main sadece draw --
+    # -- HTTP pipeline: encode+predict ayrı thread, main sadece draw --
 
     def _pipe_http(
-        self, frame_q: queue.Queue, is_live: bool,
+        self, frame_q: queue.Queue[Any], is_live: bool,
     ) -> Iterator[tuple[np.ndarray, PredictResult]]:
-        out_q: queue.Queue = queue.Queue(maxsize=2)
+        out_q: queue.Queue[Any] = queue.Queue(maxsize=2)
         min_dt = 1.0 / self._max_fps if self._max_fps > 0 else 0.0
 
-        def _worker():
+        def _worker() -> None:
             last_ts = 0.0
             while not self._stop.is_set():
                 try:
@@ -408,9 +416,8 @@ class EvrenCamera:
                     break
 
                 now = time.monotonic()
-                if now - last_ts < min_dt:
-                    if is_live:
-                        continue
+                if now - last_ts < min_dt and is_live:
+                    continue
                 last_ts = time.monotonic()
 
                 jpg = self._encode(item)
@@ -423,9 +430,9 @@ class EvrenCamera:
                     )
                     lat = (time.monotonic() - t0) * 1000
                     out_q.put((item, result, lat))
-                except Exception:
-                    import sys
-                    print("[EVREN] HTTP cikarim hatasi", file=sys.stderr, flush=True)
+                except (EvrenError, httpx.HTTPError) as exc:
+                    # tek karenin hatası akışı durdurmaz; kısa bekleyip sonrakine geçilir
+                    log.warning("HTTP inference failed: %s", exc)
                     time.sleep(0.3)
 
         work_thr = threading.Thread(target=_worker, daemon=True, name="evren-http")
@@ -467,7 +474,7 @@ class EvrenCamera:
         *,
         window_name: str = "EVREN Edge",
     ) -> None:
-        """Pencere acar, gercek zamanlı cikarim gösterir. ESC=kapat."""
+        """Pencere açar, gerçek zamanlı çıkarım gösterir. ESC=kapat."""
         for frame, _ in self.stream(source):
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -510,28 +517,28 @@ class EvrenCamera:
         codec: str = "mp4v",
         fps: float = 0.0,
     ) -> None:
-        """Annotated video kaydet — pipeline modu ile."""
+        """Kutuları çizilmiş videoyu kaydeder — pipeline modu ile."""
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
-            raise RuntimeError(f"Kaynak acilamadi: {source}")
+            raise RuntimeError(f"Kaynak açılamadı: {source}")
 
-        ws_ok = self._try_ws()
+        ws = self._try_ws()
 
         src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         out_fps = fps if fps > 0 else min(src_fps, self._max_fps)
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fourcc = cv2.VideoWriter_fourcc(*codec)
+        fourcc = cv2.VideoWriter.fourcc(*codec)
         writer = cv2.VideoWriter(str(output), fourcc, out_fps, (w, h))
 
         skip = max(1, int(src_fps / out_fps))
         idx = 0
 
-        if ws_ok:
-            self._ws_conn.start_pipeline(max_inflight=3)
+        if ws is not None:
+            ws.start_pipeline(max_inflight=3)
 
         try:
-            pending_frames: list = []
+            pending_frames: list[Any] = []
             while True:
                 ok, frame = cap.read()
                 if not ok:
@@ -542,16 +549,11 @@ class EvrenCamera:
 
                 jpg = self._encode(frame)
 
-                if ws_ok:
-                    self._ws_conn.submit(jpg)
+                if ws is not None:
+                    ws.submit(jpg)
                     pending_frames.append(frame)
-                    # drain sonuçları (non-blocking batch)
                     while len(pending_frames) >= 3:
-                        r = self._ws_conn.next_result(timeout=10)
-                        pf = pending_frames.pop(0)
-                        if r and self._draw:
-                            draw_predictions(pf, r.predictions)
-                        writer.write(pf)
+                        self._write_ws_frame(writer, ws, pending_frames.pop(0))
                 else:
                     try:
                         result = self._client.predict(
@@ -561,25 +563,27 @@ class EvrenCamera:
                         )
                         if self._draw:
                             draw_predictions(frame, result.predictions)
-                    except Exception as exc:
-                        import sys
-                        print(f"[EVREN] cikarim hatasi: {exc}", file=sys.stderr, flush=True)
+                    except (EvrenError, httpx.HTTPError) as exc:
+                        log.warning("inference failed, frame written without boxes: %s", exc)
                     writer.write(frame)
 
-            # flush kalan WS sonuçları
-            if ws_ok:
+            if ws is not None:
                 for pf in pending_frames:
-                    try:
-                        r = self._ws_conn.next_result(timeout=10)
-                        if r and self._draw:
-                            draw_predictions(pf, r.predictions)
-                    except Exception:
-                        pass
-                    writer.write(pf)
+                    self._write_ws_frame(writer, ws, pf)
         finally:
             writer.release()
             cap.release()
             self._close_ws()
+
+    def _write_ws_frame(self, writer: Any, ws: InferenceWSClient, frame: np.ndarray) -> None:
+        # sonuç gelmezse kare kutusuz yazılır; kayıt yarıda kesilmez
+        try:
+            r = ws.next_result(timeout=10)
+        except queue.Empty:
+            r = None
+        if r and self._draw:
+            draw_predictions(frame, r.predictions)
+        writer.write(frame)
 
     @property
     def stats(self) -> dict[str, float]:

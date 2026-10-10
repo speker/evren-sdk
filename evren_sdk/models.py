@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+JSON = dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -13,15 +17,15 @@ class Prediction:
     color: str | None = None
     keypoints: list[list[float]] | None = None
     mask: list[list[float]] | None = None
-    obb: dict | None = None
+    obb: JSON | None = None
     task: str | None = None
-    probs: list[dict] | None = None
+    probs: list[JSON] | None = None
 
     def __repr__(self) -> str:
         return f"<Prediction {self.class_name} conf={self.confidence:.3f}>"
 
-    def to_dict(self) -> dict:
-        d: dict = {"class_name": self.class_name, "confidence": self.confidence}
+    def to_dict(self) -> JSON:
+        d: JSON = {"class_name": self.class_name, "confidence": self.confidence}
         if self.bbox:
             d["bbox"] = self.bbox
         if self.obb:
@@ -51,7 +55,7 @@ class PredictResult:
                min_confidence: float = 0.0,
                max_confidence: float = 1.0,
                classes: list[str] | None = None) -> PredictResult:
-        """Tahminleri filtrele — yeni PredictResult dondurur."""
+        """Tahminleri filtrele — yeni PredictResult döndürür."""
         preds = self.predictions
         if min_confidence > 0:
             preds = [p for p in preds if p.confidence >= min_confidence]
@@ -63,11 +67,11 @@ class PredictResult:
         return PredictResult(preds, self.inference_ms, self.image_width, self.image_height, self.model_version_id)
 
     def to_yolo(self, class_map: dict[str, int] | list[str] | None = None) -> str:
-        """YOLO annotation formatina cevir (normalized xywh).
+        """YOLO annotation formatına çevir (normalized xywh).
 
         Args:
-            class_map: sinif_adi->index dict veya sinif listesi.
-                       None ise sinif adları alfabetik sıralanır.
+            class_map: sınıf adı -> index dict veya sınıf listesi.
+                       None ise sınıf adları alfabetik sıralanır.
         Returns:
             Her satır: ``class_id cx cy w h``
         """
@@ -94,8 +98,8 @@ class PredictResult:
 
         return "\n".join(lines)
 
-    def to_coco(self, image_id: int = 0, class_map: dict[str, int] | list[str] | None = None) -> list[dict]:
-        """COCO annotation formatında dict listesi dondurur."""
+    def to_coco(self, image_id: int = 0, class_map: dict[str, int] | list[str] | None = None) -> list[JSON]:
+        """COCO annotation formatında dict listesi döndürür."""
         if class_map is None:
             names = sorted({p.class_name for p in self.predictions})
             class_map = {n: i for i, n in enumerate(names)}
@@ -120,7 +124,7 @@ class PredictResult:
         return anns
 
     def to_csv(self, sep: str = ",") -> str:
-        """CSV formatında dondurur."""
+        """CSV formatında döndürür."""
         header = sep.join(["class_name", "confidence", "x1", "y1", "x2", "y2"])
         rows = [header]
         for p in self.predictions:
@@ -167,7 +171,7 @@ class BatchResult:
     total_ms: float = 0.0
     count: int = 0
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[PredictResult]:
         return iter(self.results)
 
     def __len__(self) -> int:
@@ -228,7 +232,7 @@ class ModelVersion:
     version_tag: str
     weights_url: str | None = None
     framework: str = "pytorch"
-    metrics: dict = field(default_factory=dict)
+    metrics: JSON = field(default_factory=dict)
     file_size_bytes: int = 0
     onnx_url: str | None = None
     tensorrt_url: str | None = None
@@ -244,10 +248,10 @@ class ModelVersion:
 
 @dataclass(slots=True)
 class SybilRiskResult:
-    """Sybil (LDCT akciger kanseri survival) cikarim sonucu — 6-yillik kalibre risk.
+    """Sybil (LDCT akciğer kanseri survival) çıkarım sonucu — 6 yıllık kalibre risk.
 
-    Vision Prediction/PredictResult ile KARISTIRILMAMALI — bu ayri, DICOM-hacim
-    odakli bir cikarim yolu (bkz. plan Asama 7).
+    Görü `Prediction`/`PredictResult` ile karıştırılmamalı: DICOM hacmi üzerinde
+    çalışan ayrı bir çıkarım yoludur.
     """
 
     id: str
@@ -263,7 +267,7 @@ class SybilRiskResult:
         return self.status in ("COMPLETED", "FAILED")
 
     def year(self, n: int) -> float | None:
-        """n. yil risk skorunu dondurur (1-indexed) — scores henuz yoksa None."""
+        """n. yılın risk skorunu döndürür (1'den başlar) — scores henüz yoksa None."""
         if not self.scores or n not in self.years:
             return None
         return self.scores[self.years.index(n)]

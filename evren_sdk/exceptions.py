@@ -28,7 +28,7 @@ class RateLimitError(EvrenError):
 
 
 class InferenceError(EvrenError):
-    """GPU cikarim sunucusu geçici olarak kullanılamıyor (HTTP 502/503)."""
+    """GPU çıkarım sunucusu geçici olarak kullanılamıyor (HTTP 502/503)."""
 
 
 class InsufficientCreditsError(EvrenError):

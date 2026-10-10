@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import time
 import uuid
@@ -29,8 +30,11 @@ from .models import (
     SybilRiskResult,
 )
 
+JSON = dict[str, Any]
+
 _API_BASE = "https://api.ssyz.org.tr/api/v1"
 _BATCH_TIMEOUT = 120.0
+_DEFAULT_RETRY_AFTER = 5
 
 
 def _auth_headers(key: str) -> dict[str, str]:
@@ -40,16 +44,23 @@ def _auth_headers(key: str) -> dict[str, str]:
 
 
 def _extract_msg(resp: httpx.Response) -> str:
-    try:
+    # gövde JSON değilse ham metnin başı yeterli
+    with contextlib.suppress(ValueError):
         body = resp.json()
         if isinstance(body, dict):
             err = body.get("error")
             if isinstance(err, dict):
-                return err.get("message") or err.get("detail") or resp.text[:300]
-            return body.get("detail") or body.get("message") or resp.text[:300]
-    except Exception:
-        pass
+                return str(err.get("message") or err.get("detail") or resp.text[:300])
+            return str(body.get("detail") or body.get("message") or resp.text[:300])
     return resp.text[:300]
+
+
+def _retry_after(resp: httpx.Response) -> int:
+    # Retry-After HTTP-date biçiminde de gelebilir (RFC 9110 §10.2.3); o durumda varsayılan
+    try:
+        return max(0, int(float(resp.headers.get("Retry-After", _DEFAULT_RETRY_AFTER))))
+    except ValueError:
+        return _DEFAULT_RETRY_AFTER
 
 
 def _raise_for(resp: httpx.Response) -> None:
@@ -75,8 +86,7 @@ def _raise_for(resp: httpx.Response) -> None:
     if code == 422:
         raise ValidationError(msg, code)
     if code == 429:
-        wait = int(resp.headers.get("Retry-After", "5"))
-        raise RateLimitError(msg, wait)
+        raise RateLimitError(msg, _retry_after(resp))
     if code >= 500:
         raise InferenceError(msg, code)
     if 400 <= code < 500:
@@ -138,17 +148,17 @@ def _build_form(version_id: str, confidence: float,
     return d
 
 
-def _top1(raw: dict) -> tuple[str, float]:
+def _top1(raw: JSON) -> tuple[str, float]:
     # classify yanıtında class_name boş gelir, sonuç probs içindedir
     name, conf = raw.get("class_name") or "", raw.get("confidence") or 0.0
     probs = raw.get("probs") or []
     if not name and probs:
         best = max(probs, key=lambda p: p.get("confidence", 0.0))
         name, conf = best.get("class_name", ""), best.get("confidence", 0.0)
-    return name, conf
+    return str(name), float(conf)
 
 
-def _to_prediction(raw: dict) -> Prediction:
+def _to_prediction(raw: JSON) -> Prediction:
     name, conf = _top1(raw)
     return Prediction(
         class_name=name,
@@ -163,7 +173,7 @@ def _to_prediction(raw: dict) -> Prediction:
     )
 
 
-def _to_result(body: dict) -> PredictResult:
+def _to_result(body: JSON) -> PredictResult:
     return PredictResult(
         predictions=[_to_prediction(p) for p in body.get("predictions", [])],
         inference_ms=body.get("inference_ms", 0),
@@ -173,7 +183,7 @@ def _to_result(body: dict) -> PredictResult:
     )
 
 
-def _to_sybil_result(body: dict) -> SybilRiskResult:
+def _to_sybil_result(body: JSON) -> SybilRiskResult:
     return SybilRiskResult(
         id=body["id"], series_id=body["series_id"], status=body.get("status", "PENDING"),
         years=body.get("years", [1, 2, 3, 4, 5, 6]), scores=body.get("scores"),
@@ -181,7 +191,7 @@ def _to_sybil_result(body: dict) -> SybilRiskResult:
     )
 
 
-def _to_model_info(m: dict) -> ModelInfo:
+def _to_model_info(m: JSON) -> ModelInfo:
     return ModelInfo(
         id=m["id"], name=m["name"], slug=m.get("slug", ""),
         architecture=m.get("architecture"),
@@ -200,7 +210,7 @@ def _to_model_info(m: dict) -> ModelInfo:
     )
 
 
-def _to_model_ver(v: dict) -> ModelVersion:
+def _to_model_ver(v: JSON) -> ModelVersion:
     return ModelVersion(
         id=v["id"], version_tag=v.get("version_tag", ""),
         weights_url=v.get("weights_url"),
@@ -220,14 +230,13 @@ def _to_model_ver(v: dict) -> ModelVersion:
     )
 
 
-def _resolve_versions(body: Any) -> list[dict]:
+def _resolve_versions(body: Any) -> list[JSON]:
     data = _unwrap(body)
-    if isinstance(data, list):
-        return data
-    return data.get("items", data.get("data", []))
+    rows = data if isinstance(data, list) else data.get("items", data.get("data", []))
+    return [row for row in rows if isinstance(row, dict)]
 
 
-def _download_target(info: dict, output: str | Path, vid: str, fmt: str) -> tuple[str, Path]:
+def _download_target(info: JSON, output: str | Path, vid: str, fmt: str) -> tuple[str, Path]:
     """İndirme ucu dosyayı değil `{download_url, filename}` döndürür; hedef yolu hazırlar."""
     url = info.get("download_url")
     if not url:
@@ -238,7 +247,7 @@ def _download_target(info: dict, output: str | Path, vid: str, fmt: str) -> tupl
         dest = dest / (info.get("filename") or f"{vid}.{fmt}")
     else:
         dest.parent.mkdir(parents=True, exist_ok=True)
-    return url, dest
+    return str(url), dest
 
 
 def _same_host(url: str, base: httpx.URL) -> bool:
@@ -266,16 +275,16 @@ async def _astream_to_file(http: httpx.AsyncClient, url: str, dest: Path) -> Non
                 fh.write(chunk)
 
 
-def _pick_version(versions: list[dict], tag: str | None, slug: str) -> str:
+def _pick_version(versions: list[JSON], tag: str | None, slug: str) -> str:
     if not versions:
         raise NotFoundError(f"'{slug}' için versiyon yok", 404)
 
     if tag is None:
-        return versions[0]["id"]
+        return str(versions[0]["id"])
 
     for v in versions:
         if v.get("version_tag") == tag:
-            return v["id"]
+            return str(v["id"])
     raise NotFoundError(f"'{slug}' için '{tag}' versiyonu yok", 404)
 
 
@@ -310,8 +319,8 @@ class EvrenClient:
         if slug in self._vcache:
             return self._vcache[slug]
 
-        slug_part, _, tag = slug.partition(":")
-        tag = tag or None
+        slug_part, _, raw_tag = slug.partition(":")
+        tag = raw_tag or None
 
         r = self._http.get(f"/models/{slug_part}")
         if r.status_code != 200:
@@ -443,13 +452,14 @@ class EvrenClient:
             imgsz=b.get("imgsz", 640),
         )
 
-    def warmup(self, models: list[str]) -> dict:
+    def warmup(self, models: list[str]) -> JSON:
         ids = [self._vid(m) for m in models]
         r = self._http.post("/inference/warmup", json=ids,
                             timeout=_BATCH_TIMEOUT)
         if r.status_code != 200:
             _raise_for(r)
-        return _unwrap(r.json())
+        status: JSON = _unwrap(r.json())
+        return status
 
     def list_models(self, limit: int = 50) -> list[ModelInfo]:
         r = self._http.get("/models",
@@ -530,7 +540,7 @@ class EvrenClient:
         )
 
     def upload_to_dataset(self, dataset_id: str,
-                          image: str | Path | bytes) -> dict:
+                          image: str | Path | bytes) -> JSON:
         """Görseli veri setine yükler (presign -> upload -> confirm)."""
         import hashlib
         raw, name, mime = _read_img(image)
@@ -565,7 +575,7 @@ class EvrenClient:
         if r2.status_code != 200:
             _raise_for(r2)
 
-        confirm_item: dict = {
+        confirm_item: JSON = {
             "object_key": obj_key,
             "sha256_hash": sha,
             "filename": name,
@@ -578,7 +588,8 @@ class EvrenClient:
         )
         if r3.status_code not in (200, 201):
             _raise_for(r3)
-        return _unwrap(r3.json())
+        confirmed: JSON = _unwrap(r3.json())
+        return confirmed
 
     def close(self) -> None:
         self._http.close()
@@ -586,7 +597,7 @@ class EvrenClient:
     def __enter__(self) -> EvrenClient:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()
 
 
@@ -619,8 +630,8 @@ class AsyncEvrenClient:
         if slug in self._vcache:
             return self._vcache[slug]
 
-        slug_part, _, tag = slug.partition(":")
-        tag = tag or None
+        slug_part, _, raw_tag = slug.partition(":")
+        tag = raw_tag or None
 
         r = await self._http.get(f"/models/{slug_part}")
         if r.status_code != 200:
@@ -740,13 +751,14 @@ class AsyncEvrenClient:
             imgsz=b.get("imgsz", 640),
         )
 
-    async def warmup(self, models: list[str]) -> dict:
+    async def warmup(self, models: list[str]) -> JSON:
         ids = [await self._vid(m) for m in models]
         r = await self._http.post("/inference/warmup", json=ids,
                                   timeout=_BATCH_TIMEOUT)
         if r.status_code != 200:
             _raise_for(r)
-        return _unwrap(r.json())
+        status: JSON = _unwrap(r.json())
+        return status
 
     async def list_models(self, limit: int = 50) -> list[ModelInfo]:
         r = await self._http.get("/models",
@@ -818,7 +830,7 @@ class AsyncEvrenClient:
         )
 
     async def upload_to_dataset(self, dataset_id: str,
-                                image: str | Path | bytes) -> dict:
+                                image: str | Path | bytes) -> JSON:
         """Görseli veri setine yükler (presign -> upload -> confirm)."""
         import hashlib
         raw, name, mime = _read_img(image)
@@ -853,7 +865,7 @@ class AsyncEvrenClient:
         if r2.status_code != 200:
             _raise_for(r2)
 
-        confirm_item: dict = {
+        confirm_item: JSON = {
             "object_key": obj_key,
             "sha256_hash": sha,
             "filename": name,
@@ -866,7 +878,8 @@ class AsyncEvrenClient:
         )
         if r3.status_code not in (200, 201):
             _raise_for(r3)
-        return _unwrap(r3.json())
+        confirmed: JSON = _unwrap(r3.json())
+        return confirmed
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -874,5 +887,5 @@ class AsyncEvrenClient:
     async def __aenter__(self) -> AsyncEvrenClient:
         return self
 
-    async def __aexit__(self, *exc: Any) -> None:
+    async def __aexit__(self, *exc: object) -> None:
         await self.close()

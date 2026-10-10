@@ -4,9 +4,9 @@ Backend ucu framework'ü (RF-DETR, D-FINE ...), fold'u ve sınıf adlarını HTT
 `predict()` ile aynı şekilde çözer. Gateway'e depolama yoluyla doğrudan
 bağlanmak Ultralytics dışı modellerde yanlış sınıf ve kutu üretiyordu.
 
-Iki mod destekler:
-  1. predict_frame() — senkron, tek frame gonder-al
-  2. Pipeline — submit/next_result ile multi-frame in-flight (GPU hiç bos kalmaz)
+İki mod destekler:
+  1. predict_frame() — senkron, tek frame gönder-al
+  2. Pipeline — submit/next_result ile multi-frame in-flight (GPU hiç boş kalmaz)
 
     ws = InferenceWSClient("evren_xxx", "owner/model")
     ws.connect()
@@ -22,17 +22,22 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import queue
 import ssl
 import threading
 import time
-import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
+import httpx
+
 from .client import EvrenClient, _top1
-from .exceptions import InferenceError
+from .exceptions import EvrenError, InferenceError
 from .models import Prediction, PredictResult
+
+if TYPE_CHECKING:
+    from websockets.sync.client import ClientConnection
 
 log = logging.getLogger(__name__)
 
@@ -80,12 +85,10 @@ def _build_ws_url(
 class InferenceWSClient:
 
     __slots__ = (
-        "_api_key", "_model", "_conf", "_iou", "_imgsz",
-        "_base_url", "_verify", "_ws", "_connected",
-        "_class_map", "_color_map", "_version_id",
-        "_reconnect_count",
-        "_send_q", "_recv_q", "_pipe_stop",
-        "_send_thr", "_recv_thr", "_pipeline_on", "_inflight",
+        "_api_key", "_base_url", "_class_map", "_color_map", "_conf", "_connected",
+        "_imgsz", "_inflight", "_iou", "_model", "_pipe_stop", "_pipeline_on",
+        "_reconnect_count", "_recv_q", "_recv_thr", "_send_q", "_send_thr",
+        "_verify", "_version_id", "_ws",
     )
 
     def __init__(
@@ -106,14 +109,14 @@ class InferenceWSClient:
         self._imgsz = image_size
         self._base_url = base_url
         self._verify = verify
-        self._ws = None
+        self._ws: ClientConnection | None = None
         self._connected = False
         self._class_map: dict[int, str] = {}
         self._color_map: dict[str, str] = {}
         self._version_id: str | None = None
         self._reconnect_count = 0
-        self._send_q: queue.Queue | None = None
-        self._recv_q: queue.Queue | None = None
+        self._send_q: queue.Queue[bytes | None] | None = None
+        self._recv_q: queue.Queue[PredictResult | None] | None = None
         self._pipe_stop: threading.Event | None = None
         self._send_thr: threading.Thread | None = None
         self._recv_thr: threading.Thread | None = None
@@ -135,19 +138,20 @@ class InferenceWSClient:
             verify=self._verify,
         )
         try:
-            self._version_id = client._vid(self._model)
-
+            version_id = client._vid(self._model)
+            self._version_id = version_id
+            # sınıf listesi yalnız isim eşlemesi için; alınamazsa sunucunun adları kullanılır
             try:
                 mc = client.model_classes(self._model)
                 self._class_map = {i: c.name for i, c in enumerate(mc.classes)}
                 self._color_map = {c.name: c.color for c in mc.classes}
-            except Exception:
-                pass
+            except (EvrenError, httpx.HTTPError) as exc:
+                log.debug("model classes unavailable: %s", exc)
         finally:
             client.close()
 
         url = _build_ws_url(
-            self._base_url, self._version_id, self._api_key,
+            self._base_url, version_id, self._api_key,
             self._conf, self._iou, self._imgsz,
         )
 
@@ -179,7 +183,8 @@ class InferenceWSClient:
         try:
             self.connect()
             return True
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - hangi hata olursa olsun sonuç "bağlanılamadı"
+            log.debug("WS reconnect failed: %s", exc)
             return False
 
     # ----- parse helper -----
@@ -220,18 +225,21 @@ class InferenceWSClient:
             inference_ms=data.get("inference_ms", 0),
         )
 
-    def _exchange(self, jpeg_bytes: bytes) -> PredictResult | object | None:
-        self._ws.send(jpeg_bytes)
+    def _exchange(self, jpeg_bytes: bytes) -> PredictResult | None:
+        ws = self._ws
+        if ws is None:
+            raise RuntimeError("WS bağlantısı yok — önce connect() çağırın")
+        ws.send(jpeg_bytes)
         while True:
-            res = self._parse_raw(self._ws.recv(timeout=10))
-            if res is not _SKIP:
+            res = self._parse_raw(ws.recv(timeout=10))
+            if res is None or isinstance(res, PredictResult):
                 return res
 
     # ----- senkron (eski uyumluluk) -----
 
     def predict_frame(self, jpeg_bytes: bytes) -> PredictResult:
         if not self._connected or self._ws is None:
-            raise RuntimeError("WS bağlantısı yok — once connect() cagirin")
+            raise RuntimeError("WS bağlantısı yok — önce connect() çağırın")
 
         try:
             result = self._exchange(jpeg_bytes)
@@ -254,7 +262,7 @@ class InferenceWSClient:
     # ----- pipeline API (multi-frame in-flight) -----
 
     def start_pipeline(self, max_inflight: int = 3) -> None:
-        """Send/recv thread'lerini başlat — GPU hiç bos kalmaz."""
+        """Send/recv thread'lerini başlatır — GPU hiç boş kalmaz."""
         if self._pipeline_on:
             return
         max_inflight = max(1, min(max_inflight, _SERVER_MAX_INFLIGHT))
@@ -273,45 +281,53 @@ class InferenceWSClient:
         self._pipeline_on = True
 
     def _pipe_send_loop(self) -> None:
-        while not self._pipe_stop.is_set():
+        ws, stop, send_q, recv_q = self._ws, self._pipe_stop, self._send_q, self._recv_q
+        if ws is None or stop is None or send_q is None or recv_q is None:
+            return
+        while not stop.is_set():
             try:
-                jpg = self._send_q.get(timeout=0.5)
+                jpg = send_q.get(timeout=0.5)
             except queue.Empty:
                 continue
             if jpg is None:
                 break
             try:
-                self._ws.send(jpg)
-            except Exception:
-                self._recv_q.put(None)
+                ws.send(jpg)
+            except Exception as exc:  # noqa: BLE001 - her gönderim hatası pipeline'ı bitirir, tüketiciye None gider
+                log.debug("WS send failed: %s", exc)
+                recv_q.put(None)
                 break
 
     def _pipe_recv_loop(self) -> None:
-        while not self._pipe_stop.is_set():
+        ws, stop, recv_q, inflight = self._ws, self._pipe_stop, self._recv_q, self._inflight
+        if ws is None or stop is None or recv_q is None or inflight is None:
+            return
+        while not stop.is_set():
             try:
-                raw = self._ws.recv(timeout=5)
-            except Exception:
-                self._recv_q.put(None)
+                raw = ws.recv(timeout=5)
+            except Exception as exc:  # noqa: BLE001 - zaman aşımı da kopma da akışın sonu
+                log.debug("WS recv ended: %s", exc)
+                recv_q.put(None)
                 break
             try:
                 result = self._parse_raw(raw)
-            except InferenceError as exc:
+            except (InferenceError, ValueError) as exc:
                 # kare sırası bozulmasın: hatalı kare boş sonuçla yer tutar
                 log.warning("WS frame hatası: %s", exc)
                 result = PredictResult(predictions=[], inference_ms=0)
             if result is _SKIP:
                 continue
-            if result is None:
-                self._recv_q.put(None)
+            if not isinstance(result, PredictResult):
+                recv_q.put(None)
                 break
-            self._recv_q.put(result)
+            recv_q.put(result)
             with contextlib.suppress(ValueError):
-                self._inflight.release()
+                inflight.release()
 
     def submit(self, jpeg_bytes: bytes) -> None:
         """Kareyi gönderir; yolda sunucu sınırı kadar kare varsa sonuç gelene dek bekler."""
         if self._send_q is None or self._inflight is None:
-            raise RuntimeError("Pipeline başlatılmadı — start_pipeline() cagir")
+            raise RuntimeError("Pipeline başlatılmadı — önce start_pipeline() çağırın")
         if not self._inflight.acquire(timeout=10):
             raise TimeoutError("WS pipeline: 10 sn içinde sonuç gelmedi")
         self._send_q.put(jpeg_bytes, timeout=10)
@@ -336,7 +352,7 @@ class InferenceWSClient:
 
     # ----- remap -----
 
-    def _remap_predictions(self, preds: list[dict]) -> None:
+    def _remap_predictions(self, preds: list[dict[str, Any]]) -> None:
         if not self._class_map:
             return
         db_names = set(self._class_map.values())
@@ -362,10 +378,9 @@ class InferenceWSClient:
         self.stop_pipeline()
         self._connected = False
         if self._ws is not None:
-            try:
+            # kapanışta oluşan hata kullanıcıya yansıtılmaz; bağlantı zaten bırakılıyor
+            with contextlib.suppress(Exception):
                 self._ws.close()
-            except Exception:
-                pass
             self._ws = None
 
     def __enter__(self) -> InferenceWSClient:
