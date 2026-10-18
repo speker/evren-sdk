@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.0] - 2026-10-18
+
+### Added
+- `speak()`: metinden sese (`voxcpm2`) — `/v1/audio/speech`. `SpeechResult.audio` istenen biçimde ikili sestir (`mp3` varsayılan, `wav`, `flac`, `opus`, `pcm`); `save(yol)` ile dosyaya yazılır. `instructions=` ile ses düz metinle tarif edilir, `speed=` 0,25-4,0. 4.096 karaktere kadar metni geçit cümle sınırlarından bölüp tek dosya döndürür
+- `AsyncEvrenLLMClient.speak()`
+
 ## [0.10.0] - 2026-10-10
 
 ### Added

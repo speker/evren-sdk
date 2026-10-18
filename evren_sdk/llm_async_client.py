@@ -21,6 +21,7 @@ from .llm_tasks import (
     QuotaStatus,
     RequestStatus,
     ResponseResult,
+    SpeechResult,
     Transcription,
     decision_body,
     parse_decision,
@@ -30,7 +31,9 @@ from .llm_tasks import (
     parse_quota,
     parse_request_status,
     parse_response,
+    parse_speech,
     parse_transcription,
+    speech_body,
     transcription_form,
 )
 from .llm_types import ChatCompletionResult, ChatDelta, RerankResult, parse_completion, parse_rerank
@@ -173,6 +176,13 @@ class AsyncEvrenLLMClient:
                              form=transcription_form(model, language, prompt, response_format, temperature),
                              files={"file": (name, raw, mime)})
         return parse_transcription(r, response_format)
+
+    async def speak(
+        self, model: str, text: str, *, voice: str = "default", response_format: str = "mp3",
+        speed: float = 1.0, instructions: str | None = None,
+    ) -> SpeechResult:
+        body = speech_body(model, text, voice, response_format, speed, instructions)
+        return parse_speech(await self._send("POST", "/v1/audio/speech", body), response_format)
 
     async def quota(self) -> QuotaStatus:
         return parse_quota((await self._send("GET", "/v1/quota")).json())

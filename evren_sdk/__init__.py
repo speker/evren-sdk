@@ -36,6 +36,7 @@ from .llm_tasks import (
     QuotaStatus,
     RequestStatus,
     ResponseResult,
+    SpeechResult,
     Transcription,
 )
 from .llm_types import ChatCompletionResult, ChatDelta, ChatMessage, RerankResult, ResponseMeta
@@ -92,6 +93,7 @@ __all__ = [
     "RerankResult",
     "ResponseMeta",
     "ResponseResult",
+    "SpeechResult",
     "SybilRiskResult",
     "Transcription",
     "ValidationError",

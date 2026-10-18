@@ -1,7 +1,7 @@
 """Sohbet dışı geçit uçlarının türleri, gövde kurucuları ve ayrıştırıcıları.
 
-Karar (`/v1/systemone`), OCR, ses transkripsiyonu, kota, istek durumu ve
-Responses API. Senkron ve asenkron istemci aynı fonksiyonları kullanır.
+Karar (`/v1/systemone`), OCR, ses transkripsiyonu, metinden ses, kota, istek
+durumu ve Responses API. Senkron ve asenkron istemci aynı fonksiyonları kullanır.
 """
 
 from __future__ import annotations
@@ -91,6 +91,21 @@ class Transcription:
 
 
 @dataclass(slots=True)
+class SpeechResult:
+    """`/v1/audio/speech` çıktısı. `audio` istenen biçimde ikili sestir; `pcm` 16 bit mono."""
+
+    audio: bytes
+    format: str
+    sample_rate: int = 48000
+    chunks: int = 1
+    request_id: str | None = None
+
+    def save(self, path: str) -> None:
+        with open(path, "wb") as fh:
+            fh.write(self.audio)
+
+
+@dataclass(slots=True)
 class QuotaStatus:
     """5 dk'lık kayan pencere + günlük tavan + kredi durumu (`/v1/quota`)."""
 
@@ -154,6 +169,24 @@ def transcription_form(
     if prompt:
         form["prompt"] = prompt
     return form
+
+
+def speech_body(
+    model: str, text: str, voice: str, response_format: str, speed: float, instructions: str | None,
+) -> JSON:
+    body: JSON = {"model": model, "input": text, "voice": voice, "response_format": response_format, "speed": speed}
+    if instructions:
+        body["instructions"] = instructions
+    return body
+
+
+def parse_speech(resp: httpx.Response, response_format: str) -> SpeechResult:
+    return SpeechResult(
+        audio=resp.content, format=response_format,
+        sample_rate=int(resp.headers.get("X-Evren-Audio-Sample-Rate") or 48000),
+        chunks=int(resp.headers.get("X-Evren-Audio-Chunks") or 1),
+        request_id=resp.headers.get("X-Evren-Request-Id"),
+    )
 
 
 def _float(value: Any) -> float | None:

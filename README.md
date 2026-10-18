@@ -312,6 +312,10 @@ with EvrenLLMClient() as llm:
     print(llm.transcribe("qwen3-asr-1.7b", "toplanti.wav", language="tr").text)
     altyazi = llm.transcribe("qwen3-asr-1.7b", "video.mp3", response_format="srt").text
 
+    ses = llm.speak("voxcpm2", "Raporunuz hazır. Doğruluk oranı yüzde 94,7.",
+                    instructions="sakin ve net konuşan bir kadın sesi")   # metinden sese
+    ses.save("rapor.mp3")  # mp3 (varsayılan), wav, flac, opus, pcm
+
     q = llm.quota()        # 5 dk pencere, günlük tavan, kredi
     print(q.level, q.daily_remaining_tokens, q.remaining_cr)
 
@@ -321,7 +325,8 @@ with EvrenLLMClient() as llm:
 ```
 
 Ses ucunda geçit `Idempotency-Key` desteklemediği için `transcribe()` yalnızca
-bağlantı hiç kurulamadıysa tekrar denenir.
+bağlantı hiç kurulamadıysa tekrar denenir. `speak()` için de aynısı geçerlidir;
+4.096 karaktere kadar metni geçit cümle sınırlarından bölüp tek dosya döndürür.
 
 ### Edge Modu (GPU'suz Cihazlar)
 
@@ -453,6 +458,7 @@ except InferenceError:
 | `decide_batch(model, states, questions)` | `/v1/systemone/batch` | `DecisionBatchResult` |
 | `ocr(model, image)` | `/v1/ocr` | `OcrResult` |
 | `transcribe(model, audio, response_format=)` | `/v1/audio/transcriptions` | `Transcription` |
+| `speak(model, text, response_format=, instructions=)` | `/v1/audio/speech` | `SpeechResult` |
 | `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
 | `quota()` | `/v1/quota` | `QuotaStatus` |
@@ -713,13 +719,16 @@ with EvrenLLMClient() as llm:
 
     print(llm.ocr("dots-ocr", "receipt.png").text)
     print(llm.transcribe("qwen3-asr-1.7b", "meeting.wav", language="tr").text)
+    llm.speak("voxcpm2", "Your report is ready.", response_format="wav").save("report.wav")  # text-to-speech
     print(llm.quota().daily_remaining_tokens)
     first = llm.respond("glm-5.3", "Capital of Türkiye?")             # Responses API
     print(llm.respond("glm-5.3", "Population?", previous_response_id=first.id).output_text)
 ```
 
-The gateway does not accept `Idempotency-Key` on the audio endpoint, so
-`transcribe()` is retried only when the connection could not be established.
+The gateway does not accept `Idempotency-Key` on the audio endpoints, so
+`transcribe()` and `speak()` are retried only when the connection could not be
+established. `speak()` accepts up to 4,096 characters; the gateway splits long
+text at sentence boundaries and returns a single file.
 
 ### Edge Mode (GPU-free Devices)
 
@@ -847,6 +856,7 @@ except InferenceError:
 | `decide_batch(model, states, questions)` | `/v1/systemone/batch` | `DecisionBatchResult` |
 | `ocr(model, image)` | `/v1/ocr` | `OcrResult` |
 | `transcribe(model, audio, response_format=)` | `/v1/audio/transcriptions` | `Transcription` |
+| `speak(model, text, response_format=, instructions=)` | `/v1/audio/speech` | `SpeechResult` |
 | `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
 | `quota()` | `/v1/quota` | `QuotaStatus` |

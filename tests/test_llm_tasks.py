@@ -137,6 +137,36 @@ def test_transcribe_not_retried_after_send():
     assert len(calls) == 1
 
 
+def test_speak(tmp_path):
+    seen = {}
+
+    def h(req):
+        seen["path"] = req.url.path
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, content=b"ID3mp3", headers={
+            "content-type": "audio/mpeg", "x-evren-audio-chunks": "3", "x-evren-request-id": "s1",
+        })
+
+    r = _client(h).speak("voxcpm2", "Merhaba.", instructions="sakin bir ses", speed=1.25)
+    assert seen["path"] == "/v1/audio/speech"
+    assert seen["body"] == {
+        "model": "voxcpm2", "input": "Merhaba.", "voice": "default", "response_format": "mp3",
+        "speed": 1.25, "instructions": "sakin bir ses",
+    }
+    assert r.audio == b"ID3mp3" and r.chunks == 3 and r.request_id == "s1" and r.sample_rate == 48000
+    out = tmp_path / "ses.mp3"
+    r.save(str(out))
+    assert out.read_bytes() == b"ID3mp3"
+
+
+@pytest.mark.asyncio
+async def test_async_speak():
+    c = AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"RIFF")))
+    async with c:
+        r = await c.speak("voxcpm2", "Merhaba.", response_format="wav")
+    assert r.audio == b"RIFF" and r.format == "wav"
+
+
 def test_quota_status():
     body = {"level": "warn", "used_tokens": 400, "cap": 500, "usage_ratio": 0.8, "held_cr": "1.5",
             "remaining_cr": "98.25", "daily_limit_tokens": 15000000, "daily_remaining_tokens": 14000000}
