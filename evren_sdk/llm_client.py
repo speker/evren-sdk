@@ -265,7 +265,11 @@ class EvrenLLMClient:
         self, model: str, text: str, *, voice: str = "default", response_format: str = "mp3",
         speed: float = 1.0, instructions: str | None = None,
     ) -> SpeechResult:
-        """Metni sese çevirir (`voxcpm2`). Biçim: mp3, wav, flac, opus, pcm. Uzun metni geçit böler."""
+        """Metni sese çevirir (`voxcpm2`). Biçim: mp3, wav, flac, opus, pcm. Uzun metni geçit böler.
+
+        `voice` hazır seslerden biri: deniz, ece, emre, kaan (`default` = deniz); aynı sesle yapılan
+        ayrı çağrılar aynı konuşmacıyla okunur. `instructions` verilirse ses tarife göre üretilir.
+        """
         r = self._send("POST", "/v1/audio/speech", speech_body(model, text, voice, response_format, speed, instructions))
         return parse_speech(r, response_format)
 

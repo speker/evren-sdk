@@ -181,6 +181,7 @@ class AsyncEvrenLLMClient:
         self, model: str, text: str, *, voice: str = "default", response_format: str = "mp3",
         speed: float = 1.0, instructions: str | None = None,
     ) -> SpeechResult:
+        # voice: deniz, ece, emre, kaan (default = deniz) - ayrı çağrılarda aynı konuşmacı
         body = speech_body(model, text, voice, response_format, speed, instructions)
         return parse_speech(await self._send("POST", "/v1/audio/speech", body), response_format)
 
