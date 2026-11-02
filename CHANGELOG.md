@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- `response_input_tokens()`: girdinin kaç token tutacağını istekten önce sayar (`POST /v1/responses/input_tokens`) — ücretsiz uç, günlük kotaya yazılmaz. `instructions`, araç şemaları ve `previous_response_id` zinciri sayılır; `auto` ile çalışmaz. `InputTokensResult.input_tokens`
+- `quota(model=)`: `GET /v1/quota?model=<api_name>` — yanıt eşzamanlılık alanlarını da doldurur: `QuotaStatus.concurrency_limit`, `concurrent_requests` ve model yoğunken `model_concurrency_limit`. Argsüz çağrı önceki sürümlerle birebir aynı kalır
 - Kullanım şartları kapısı: `terms_status()` (`/v1/terms/status`), `terms_text()` (`/v1/terms/text`), `accept_terms(version=None)` (`/v1/terms/accept`) ve tek çağrılık `ensure_terms_accepted()` yardımcısı. Onaysız hesabın her çağrısı `403 terms_not_accepted` döner; hata artık `LLMTermsNotAcceptedError` olarak ayrı sınıfa eşlenir (yanlış `LLMAuthenticationError` yerine)
 - `moderate()`: metin içerik denetimi (`POST /v1/moderations`, `qwen3-guard-4b`) — ücretsiz uç, günlük kotaya yazılmaz. `ModerationResult.flagged/categories/scores`
 - `delete_response(id)` (`DELETE /v1/responses/{id}`) ve `response_input_items(id, limit=, after=)` (`GET /v1/responses/{id}/input_items`, sayfalı)

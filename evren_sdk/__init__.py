@@ -32,6 +32,7 @@ from .llm_media import encode_image
 from .llm_tasks import (
     DecisionBatchResult,
     DecisionResult,
+    InputTokensResult,
     LLMModel,
     ModerationResult,
     OcrResult,
@@ -76,6 +77,7 @@ __all__ = [
     "EvrenLLMError",
     "InferenceError",
     "InferenceWSClient",
+    "InputTokensResult",
     "InsufficientCreditsError",
     "LLMAuthenticationError",
     "LLMConflictError",

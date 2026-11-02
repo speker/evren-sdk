@@ -317,7 +317,11 @@ with EvrenLLMClient() as llm:
     ses.save("rapor.mp3")  # mp3 (varsayılan), wav, flac, opus, pcm
 
     q = llm.quota()        # 5 dk pencere, günlük tavan, kredi
-    print(q.level, q.daily_remaining_tokens, q.remaining_cr)
+    qm = llm.quota(model="glm-5.3")   # + eşzamanlılık: concurrency_limit, concurrent_requests
+    print(q.level, q.daily_remaining_tokens, q.remaining_cr, qm.concurrency_limit)
+
+    n = llm.response_input_tokens("glm-5.3", "Uzun belge özeti", instructions="Kısa yanıt ver.")
+    print(n.input_tokens)  # ücretsiz uç — göndermeden önce girdi token sayısı
 
     yanit = llm.respond("glm-5.3", "Türkiye'nin başkenti?")          # Responses API
     devam = llm.respond("glm-5.3", "Nüfusu?", previous_response_id=yanit.id)
@@ -488,8 +492,9 @@ except InferenceError:
 | `delete_response(id)` / `response_input_items(id)` | `/v1/responses/{id}` | `None` / `ResponseInputItems` |
 | `moderate(model, text)` | `/v1/moderations` | `ModerationResult` |
 | `terms_status()` / `terms_text()` / `accept_terms()` / `ensure_terms_accepted()` | `/v1/terms/*` | `TermsStatus` / `str` / `TermsAcceptance` |
+| `response_input_tokens(model, input, **kw)` | `/v1/responses/input_tokens` | `InputTokensResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
-| `quota()` | `/v1/quota` | `QuotaStatus` |
+| `quota(model=None)` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
 `encode_image(kaynak, max_side=None)` yol, bayt ya da `data:` URL'yi geçidin kabul
@@ -749,6 +754,8 @@ with EvrenLLMClient() as llm:
     print(llm.transcribe("qwen3-asr-1.7b", "meeting.wav", language="tr").text)
     llm.speak("voxcpm2", "Your report is ready.", voice="kaan", response_format="wav").save("report.wav")  # text-to-speech
     print(llm.quota().daily_remaining_tokens)
+    print(llm.quota(model="glm-5.3").concurrency_limit)   # model-scoped concurrency limits
+    print(llm.response_input_tokens("glm-5.3", "Long document").input_tokens)  # free pre-send token count
     first = llm.respond("glm-5.3", "Capital of Türkiye?")             # Responses API
     print(llm.respond("glm-5.3", "Population?", previous_response_id=first.id).output_text)
     mod = llm.moderate("qwen3-guard-4b", "Text to screen")            # free endpoint
@@ -913,8 +920,9 @@ except InferenceError:
 | `delete_response(id)` / `response_input_items(id)` | `/v1/responses/{id}` | `None` / `ResponseInputItems` |
 | `moderate(model, text)` | `/v1/moderations` | `ModerationResult` |
 | `terms_status()` / `terms_text()` / `accept_terms()` / `ensure_terms_accepted()` | `/v1/terms/*` | `TermsStatus` / `str` / `TermsAcceptance` |
+| `response_input_tokens(model, input, **kw)` | `/v1/responses/input_tokens` | `InputTokensResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
-| `quota()` | `/v1/quota` | `QuotaStatus` |
+| `quota(model=None)` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
 `encode_image(source, max_side=None)` turns a path, bytes or `data:` URL into the

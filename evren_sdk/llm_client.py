@@ -22,6 +22,7 @@ from .llm_sse import StreamDrain
 from .llm_tasks import (
     DecisionBatchResult,
     DecisionResult,
+    InputTokensResult,
     LLMModel,
     ModerationResult,
     OcrResult,
@@ -34,9 +35,11 @@ from .llm_tasks import (
     TermsStatus,
     Transcription,
     decision_body,
+    input_tokens_body,
     parse_decision,
     parse_decision_batch,
     parse_input_items,
+    parse_input_tokens,
     parse_models,
     parse_moderation,
     parse_ocr,
@@ -282,8 +285,18 @@ class EvrenLLMClient:
         r = self._send("POST", "/v1/audio/speech", speech_body(model, text, voice, response_format, speed, instructions))
         return parse_speech(r, response_format)
 
-    def quota(self) -> QuotaStatus:
-        return parse_quota(self._send("GET", "/v1/quota").json())
+    def quota(self, model: str | None = None) -> QuotaStatus:
+        """Kota ve eşzamanlılık durumu (`GET /v1/quota`).
+
+        Args:
+            model: Verilirse (`?model=<api_name>`) yanıt eşzamanlılık alanlarını da
+                doldurur: `concurrency_limit` (hesabın toplam sınırı),
+                `concurrent_requests` (o anki kullanım) ve model yoğunken
+                `model_concurrency_limit` (o modeldeki pay). Verilmezse çağrı,
+                önceki sürümlerle birebir aynı kalır.
+        """
+        params = {"model": model} if model else None
+        return parse_quota(self._send("GET", "/v1/quota", params=params).json())
 
     def request_status(self, request_id: str) -> RequestStatus:
         """Yanıttaki `id` ile isteğin yürütme ve ücret durumu."""
@@ -361,6 +374,24 @@ class EvrenLLMClient:
         r = self._send("POST", "/v1/moderations", {"model": model, "input": text},
                        self._cfg.idem_key(idempotency_key))
         return parse_moderation(r.json(), r.headers, model)
+
+    def response_input_tokens(
+        self, model: str, input: Any, *, idempotency_key: str | None = None, **kwargs: Any,
+    ) -> InputTokensResult:
+        """Girdinin kaç token tutacağını istekten ÖNCE sayar (`POST /v1/responses/input_tokens`).
+
+        Ücretsiz uç — günlük kotaya yazılmaz. `instructions` ve fonksiyon araçlarının
+        şemaları da sayılır; `previous_response_id` verilirse zincirin tamamı (düşünme ve
+        araç çağrısı geçmişi dahil) hesaba katılır. Sonuç asıl yanıttaki
+        `usage.input_tokens` ile birebir eşleşir. `auto` ile çalışmaz; somut bir model
+        adı verin.
+
+        >>> r = c.response_input_tokens("glm-5.3", "Uzun belge", instructions="Kısa yanıt ver.")
+        >>> r.input_tokens
+        """
+        body = input_tokens_body(model, input, kwargs)
+        r = self._send("POST", "/v1/responses/input_tokens", body, self._cfg.idem_key(idempotency_key))
+        return parse_input_tokens(r.json())
 
     def close(self) -> None:
         self._http.close()

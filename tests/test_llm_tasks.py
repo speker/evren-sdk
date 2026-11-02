@@ -366,3 +366,73 @@ async def test_async_terms_and_moderate():
 
         r = await c.moderate("qwen3-guard-4b", "selam")
         assert r.flagged is False
+
+
+def test_response_input_tokens():
+    """`/v1/responses/input_tokens` — ücretsiz uç; instructions ve araç şemaları sayılır."""
+    body = {"object": "response.input_tokens", "input_tokens": 4210}
+    seen = {}
+
+    def h(req):
+        assert req.method == "POST" and req.url.path == "/v1/responses/input_tokens"
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json=body)
+
+    r = _client(h).response_input_tokens(
+        "glm-5.3", "Uzun bir belge özeti...", instructions="Kısa yanıt ver.", previous_response_id="resp_9",
+    )
+    assert r.input_tokens == 4210 and r.raw["object"] == "response.input_tokens"
+    assert seen["model"] == "glm-5.3" and seen["instructions"] == "Kısa yanıt ver."
+    assert seen["previous_response_id"] == "resp_9" and "input" in seen
+
+
+def test_response_input_tokens_minimal():
+    body = {"object": "response.input_tokens", "input_tokens": 7}
+
+    r = _client(lambda req: httpx.Response(200, json=body)).response_input_tokens("auto", "Merhaba")
+    assert r.input_tokens == 7
+
+
+def test_quota_with_model():
+    """`GET /v1/quota?model=<id>` — model bazlı eşzamanlılık sınırları."""
+    body = {"level": "ok", "remaining_cr": "1000", "held_cr": "0",
+            "concurrency_limit": 8, "concurrent_requests": 3, "model_concurrency_limit": 4}
+    seen = {}
+
+    def h(req):
+        assert req.method == "GET"
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json=body)
+
+    q = _client(h).quota(model="glm-5.3")
+    assert q.concurrency_limit == 8 and q.concurrent_requests == 3 and q.model_concurrency_limit == 4
+    assert seen["url"].endswith("/v1/quota?model=glm-5.3")
+    assert q.level == "ok" and q.remaining_cr == 1000.0
+
+
+def test_quota_without_model_has_no_query():
+    body = {"level": "ok", "remaining_cr": "1000", "held_cr": "0", "concurrency_limit": 5, "concurrent_requests": 0}
+    seen = {}
+
+    def h(req):
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json=body)
+
+    q = _client(h).quota()
+    assert "?" not in seen["url"]  # geriye dönük uyum: argsüz çağrı sorgu dizgisiz
+    assert q.concurrency_limit == 5 and q.model_concurrency_limit is None
+
+
+@pytest.mark.asyncio
+async def test_async_input_tokens_and_quota_model():
+    def h(req):
+        if req.url.path == "/v1/responses/input_tokens":
+            return httpx.Response(200, json={"object": "response.input_tokens", "input_tokens": 99})
+        return httpx.Response(200, json={"level": "ok", "remaining_cr": "1", "held_cr": "0",
+                                         "concurrency_limit": 2, "concurrent_requests": 1})
+
+    async with AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(h)) as c:
+        r = await c.response_input_tokens("deepseek-v4.1-flash", "selam")
+        assert r.input_tokens == 99
+        q = await c.quota(model="deepseek-v4.1-flash")
+        assert q.concurrency_limit == 2 and q.concurrent_requests == 1

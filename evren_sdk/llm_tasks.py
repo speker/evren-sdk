@@ -107,7 +107,13 @@ class SpeechResult:
 
 @dataclass(slots=True)
 class QuotaStatus:
-    """5 dk'lık kayan pencere + günlük tavan + kredi durumu (`/v1/quota`)."""
+    """5 dk'lık kayan pencere + günlük tavan + kredi durumu (`/v1/quota`).
+
+    `model=` ile sorulduğunda eşzamanlılık alanları da dolar: `concurrency_limit`
+    hesabın tüm modellerdeki toplam eşzamanlı istek sınırı, `concurrent_requests`
+    o anki kullanım, `model_concurrency_limit` model yoğunken o modelde açılabilecek
+    istek sayısı payı (yalnız model kalabalıkken döner).
+    """
 
     level: str
     remaining_cr: float
@@ -121,6 +127,9 @@ class QuotaStatus:
     daily_limit_tokens: int | None = None
     daily_remaining_tokens: int | None = None
     daily_reset_at: str | None = None
+    concurrency_limit: int | None = None
+    concurrent_requests: int | None = None
+    model_concurrency_limit: int | None = None
 
 
 @dataclass(slots=True)
@@ -201,6 +210,19 @@ class ResponseInputItems:
     first_id: str | None = None
     last_id: str | None = None
     has_more: bool = False
+    raw: JSON = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class InputTokensResult:
+    """`POST /v1/responses/input_tokens` sonucu — ücretsiz uç, günlük kotaya yazılmaz.
+
+    `instructions` ve fonksiyon araçlarının şemaları da sayılır; `previous_response_id`
+    verilirse zincirin tamamı hesaba katılır. Sonuç asıl yanıttaki
+    `usage.input_tokens` ile birebir eşleşir. `auto` ile çalışmaz; somut model adı gerekir.
+    """
+
+    input_tokens: int
     raw: JSON = field(default_factory=dict)
 
 
@@ -293,6 +315,8 @@ def parse_quota(body: JSON) -> QuotaStatus:
         reset_at=body.get("reset_at"), usage_ratio=_float(body.get("usage_ratio")),
         daily_used_tokens=body.get("daily_used_tokens"), daily_limit_tokens=body.get("daily_limit_tokens"),
         daily_remaining_tokens=body.get("daily_remaining_tokens"), daily_reset_at=body.get("daily_reset_at"),
+        concurrency_limit=body.get("concurrency_limit"), concurrent_requests=body.get("concurrent_requests"),
+        model_concurrency_limit=body.get("model_concurrency_limit"),
     )
 
 
@@ -352,3 +376,11 @@ def parse_input_items(body: JSON) -> ResponseInputItems:
         items=list(body.get("data") or []), first_id=body.get("first_id"),
         last_id=body.get("last_id"), has_more=bool(body.get("has_more")), raw=body,
     )
+
+
+def input_tokens_body(model: str, input: Any, extra: JSON) -> JSON:
+    return {**extra, "model": model, "input": input}
+
+
+def parse_input_tokens(body: JSON) -> InputTokensResult:
+    return InputTokensResult(input_tokens=int(body.get("input_tokens") or 0), raw=body)

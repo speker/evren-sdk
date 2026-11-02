@@ -16,6 +16,7 @@ from .llm_sse import StreamDrain
 from .llm_tasks import (
     DecisionBatchResult,
     DecisionResult,
+    InputTokensResult,
     LLMModel,
     ModerationResult,
     OcrResult,
@@ -28,9 +29,11 @@ from .llm_tasks import (
     TermsStatus,
     Transcription,
     decision_body,
+    input_tokens_body,
     parse_decision,
     parse_decision_batch,
     parse_input_items,
+    parse_input_tokens,
     parse_models,
     parse_moderation,
     parse_ocr,
@@ -194,8 +197,11 @@ class AsyncEvrenLLMClient:
         body = speech_body(model, text, voice, response_format, speed, instructions)
         return parse_speech(await self._send("POST", "/v1/audio/speech", body), response_format)
 
-    async def quota(self) -> QuotaStatus:
-        return parse_quota((await self._send("GET", "/v1/quota")).json())
+    async def quota(self, model: str | None = None) -> QuotaStatus:
+        """Kota ve eşzamanlılık durumu. `model=` verilirse `?model=<api_name>` ile
+        `concurrency_limit` / `concurrent_requests` / `model_concurrency_limit` dolar."""
+        params = {"model": model} if model else None
+        return parse_quota((await self._send("GET", "/v1/quota", params=params)).json())
 
     async def request_status(self, request_id: str) -> RequestStatus:
         return parse_request_status((await self._send("GET", f"/v1/requests/{request_id}")).json())
@@ -256,6 +262,14 @@ class AsyncEvrenLLMClient:
         r = await self._send("POST", "/v1/moderations", {"model": model, "input": text},
                              self._cfg.idem_key(idempotency_key))
         return parse_moderation(r.json(), r.headers, model)
+
+    async def response_input_tokens(
+        self, model: str, input: Any, *, idempotency_key: str | None = None, **kwargs: Any,
+    ) -> InputTokensResult:
+        """Girdinin kaç token tutacağını istekten önce sayar. `EvrenLLMClient.response_input_tokens` ile aynı."""
+        body = input_tokens_body(model, input, kwargs)
+        r = await self._send("POST", "/v1/responses/input_tokens", body, self._cfg.idem_key(idempotency_key))
+        return parse_input_tokens(r.json())
 
     async def close(self) -> None:
         await self._http.aclose()
