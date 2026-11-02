@@ -22,22 +22,33 @@ from .llm_sse import StreamDrain
 from .llm_tasks import (
     DecisionBatchResult,
     DecisionResult,
+    InputTokensResult,
     LLMModel,
+    ModerationResult,
     OcrResult,
     QuotaStatus,
     RequestStatus,
+    ResponseInputItems,
     ResponseResult,
     SpeechResult,
+    TermsAcceptance,
+    TermsStatus,
     Transcription,
     decision_body,
+    input_tokens_body,
     parse_decision,
     parse_decision_batch,
+    parse_input_items,
+    parse_input_tokens,
     parse_models,
+    parse_moderation,
     parse_ocr,
     parse_quota,
     parse_request_status,
     parse_response,
     parse_speech,
+    parse_terms_acceptance,
+    parse_terms_status,
     parse_transcription,
     speech_body,
     transcription_form,
@@ -115,6 +126,7 @@ class EvrenLLMClient:
     def _send(
         self, method: str, path: str, body: dict[str, Any] | None = None, idem: str | None = None,
         *, form: dict[str, str] | None = None, files: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> httpx.Response:
         # GET doğası gereği tekrarlanabilir; POST ancak Idempotency-Key ile
         safe = method == "GET" or idem is not None
@@ -122,7 +134,7 @@ class EvrenLLMClient:
             last = attempt == self._cfg.max_retries
             try:
                 r = self._http.request(
-                    method, path, json=body, data=form, files=files, headers=idem_headers(idem),
+                    method, path, json=body, data=form, files=files, params=params, headers=idem_headers(idem),
                 )
             except httpx.TransportError as exc:
                 if last or not should_retry_exc(exc, idempotent=safe):
@@ -273,8 +285,18 @@ class EvrenLLMClient:
         r = self._send("POST", "/v1/audio/speech", speech_body(model, text, voice, response_format, speed, instructions))
         return parse_speech(r, response_format)
 
-    def quota(self) -> QuotaStatus:
-        return parse_quota(self._send("GET", "/v1/quota").json())
+    def quota(self, model: str | None = None) -> QuotaStatus:
+        """Kota ve eşzamanlılık durumu (`GET /v1/quota`).
+
+        Args:
+            model: Verilirse (`?model=<api_name>`) yanıt eşzamanlılık alanlarını da
+                doldurur: `concurrency_limit` (hesabın toplam sınırı),
+                `concurrent_requests` (o anki kullanım) ve model yoğunken
+                `model_concurrency_limit` (o modeldeki pay). Verilmezse çağrı,
+                önceki sürümlerle birebir aynı kalır.
+        """
+        params = {"model": model} if model else None
+        return parse_quota(self._send("GET", "/v1/quota", params=params).json())
 
     def request_status(self, request_id: str) -> RequestStatus:
         """Yanıttaki `id` ile isteğin yürütme ve ücret durumu."""
@@ -291,6 +313,85 @@ class EvrenLLMClient:
     def get_response(self, response_id: str) -> ResponseResult:
         r = self._send("GET", f"/v1/responses/{response_id}")
         return parse_response(r.json(), r.headers, "")
+
+    def delete_response(self, response_id: str) -> None:
+        """Zincir kaydını sunucudan siler (`DELETE /v1/responses/{id}`)."""
+        self._send("DELETE", f"/v1/responses/{response_id}")
+
+    def response_input_items(
+        self, response_id: str, *, limit: int | None = None, after: str | None = None,
+    ) -> ResponseInputItems:
+        """`GET /v1/responses/{id}/input_items` — o turda gönderilen girdi ögeleri, sayfalı."""
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if after is not None:
+            params["after"] = after
+        r = self._send("GET", f"/v1/responses/{response_id}/input_items", params=params or None)
+        return parse_input_items(r.json())
+
+    def terms_status(self) -> TermsStatus:
+        """Kullanım şartlarının kabul durumunu döner (`GET /v1/terms/status`)."""
+        return parse_terms_status(self._send("GET", "/v1/terms/status").json())
+
+    def terms_text(self) -> str:
+        """Kabul etmeden önce şartlar metnini okur (`GET /v1/terms/text`)."""
+        return str(self._send("GET", "/v1/terms/text").json().get("content") or "")
+
+    def accept_terms(self, version: int | None = None) -> TermsAcceptance:
+        """Kullanım şartlarını onaylar (`POST /v1/terms/accept`).
+
+        Args:
+            version: Onanacak sürüm. Verilmezse `/v1/terms/status`'tan okunan güncel
+                sürüm gönderilir. Hesap başına bir kez gerekir; yeni esaslı sürüm
+                yayınlanana kadar tekrar istenmez.
+        """
+        if version is None:
+            version = self.terms_status().current_version
+        r = self._send("POST", "/v1/terms/accept", {"version": int(version)})
+        return parse_terms_acceptance(r.json())
+
+    def ensure_terms_accepted(self) -> TermsAcceptance | None:
+        """Şartlar onaylıysa `None`, değilse okuyup onaylar ve sonucu döner.
+
+        İlk çağrıdan önce 403 `terms_not_accepted` hatasıyla karşılaşmamak için:
+        >>> c.ensure_terms_accepted()
+        >>> c.chat("glm-5.3", [...])
+        """
+        status = self.terms_status()
+        if status.needs_accept:
+            return self.accept_terms(status.current_version)
+        return None
+
+    def moderate(
+        self, model: str, text: str, *, idempotency_key: str | None = None,
+    ) -> ModerationResult:
+        """Metin içerik denetimi (`POST /v1/moderations`, `qwen3-guard-4b`).
+
+        Ücretsiz uç — günlük token kotasına yazılmaz. `flagged` modelin genel
+        kararı; `categories`/`scores` risk kategorilerini taşır.
+        """
+        r = self._send("POST", "/v1/moderations", {"model": model, "input": text},
+                       self._cfg.idem_key(idempotency_key))
+        return parse_moderation(r.json(), r.headers, model)
+
+    def response_input_tokens(
+        self, model: str, input: Any, *, idempotency_key: str | None = None, **kwargs: Any,
+    ) -> InputTokensResult:
+        """Girdinin kaç token tutacağını istekten ÖNCE sayar (`POST /v1/responses/input_tokens`).
+
+        Ücretsiz uç — günlük kotaya yazılmaz. `instructions` ve fonksiyon araçlarının
+        şemaları da sayılır; `previous_response_id` verilirse zincirin tamamı (düşünme ve
+        araç çağrısı geçmişi dahil) hesaba katılır. Sonuç asıl yanıttaki
+        `usage.input_tokens` ile birebir eşleşir. `auto` ile çalışmaz; somut bir model
+        adı verin.
+
+        >>> r = c.response_input_tokens("glm-5.3", "Uzun belge", instructions="Kısa yanıt ver.")
+        >>> r.input_tokens
+        """
+        body = input_tokens_body(model, input, kwargs)
+        r = self._send("POST", "/v1/responses/input_tokens", body, self._cfg.idem_key(idempotency_key))
+        return parse_input_tokens(r.json())
 
     def close(self) -> None:
         self._http.close()

@@ -317,12 +317,37 @@ with EvrenLLMClient() as llm:
     ses.save("rapor.mp3")  # mp3 (varsayılan), wav, flac, opus, pcm
 
     q = llm.quota()        # 5 dk pencere, günlük tavan, kredi
-    print(q.level, q.daily_remaining_tokens, q.remaining_cr)
+    qm = llm.quota(model="glm-5.3")   # + eşzamanlılık: concurrency_limit, concurrent_requests
+    print(q.level, q.daily_remaining_tokens, q.remaining_cr, qm.concurrency_limit)
+
+    n = llm.response_input_tokens("glm-5.3", "Uzun belge özeti", instructions="Kısa yanıt ver.")
+    print(n.input_tokens)  # ücretsiz uç — göndermeden önce girdi token sayısı
 
     yanit = llm.respond("glm-5.3", "Türkiye'nin başkenti?")          # Responses API
     devam = llm.respond("glm-5.3", "Nüfusu?", previous_response_id=yanit.id)
     print(devam.output_text)
+
+    m = llm.moderate("qwen3-guard-4b", "Denetlenecek metin")        # ücretsiz uç
+    print(m.flagged, m.categories, m.scores)
 ```
+
+### Kullanım Şartları Kapısı
+
+Geçit, hesap başına bir kez kullanım şartlarının onaylanmasını ister; onaysızken
+her çağrı `403 terms_not_accepted` döner. SDK bu akışı yönetir:
+
+```python
+with EvrenLLMClient() as llm:
+    durum = llm.terms_status()          # kabul durumu + güncel sürüm
+    metin = llm.terms_text()            # kabul etmeden önce okuyun
+    onay = llm.accept_terms()           # güncel sürümü onaylar (veya accept_terms(surum))
+    llm.ensure_terms_accepted()         # onaylıysa dokunmaz, değilse okuyup onaylar
+```
+
+`ensure_terms_accepted()` ilk çağrınızdan önce çalıştırılırsa
+`LLMTermsNotAcceptedError` ile karşılaşmazsınız. Yeni esaslı bir sürüm
+yayınlandığında geçit tekrar onay ister — `terms_status().needs_accept`
+kolayca kontrol edilir.
 
 Ses ucunda geçit `Idempotency-Key` desteklemediği için `transcribe()` yalnızca
 bağlantı hiç kurulamadıysa tekrar denenir. `speak()` için de aynısı geçerlidir;
@@ -464,8 +489,12 @@ except InferenceError:
 | `transcribe(model, audio, response_format=)` | `/v1/audio/transcriptions` | `Transcription` |
 | `speak(model, text, voice=, response_format=, instructions=)` | `/v1/audio/speech` | `SpeechResult` |
 | `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
+| `delete_response(id)` / `response_input_items(id)` | `/v1/responses/{id}` | `None` / `ResponseInputItems` |
+| `moderate(model, text)` | `/v1/moderations` | `ModerationResult` |
+| `terms_status()` / `terms_text()` / `accept_terms()` / `ensure_terms_accepted()` | `/v1/terms/*` | `TermsStatus` / `str` / `TermsAcceptance` |
+| `response_input_tokens(model, input, **kw)` | `/v1/responses/input_tokens` | `InputTokensResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
-| `quota()` | `/v1/quota` | `QuotaStatus` |
+| `quota(model=None)` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
 `encode_image(kaynak, max_side=None)` yol, bayt ya da `data:` URL'yi geçidin kabul
@@ -725,9 +754,31 @@ with EvrenLLMClient() as llm:
     print(llm.transcribe("qwen3-asr-1.7b", "meeting.wav", language="tr").text)
     llm.speak("voxcpm2", "Your report is ready.", voice="kaan", response_format="wav").save("report.wav")  # text-to-speech
     print(llm.quota().daily_remaining_tokens)
+    print(llm.quota(model="glm-5.3").concurrency_limit)   # model-scoped concurrency limits
+    print(llm.response_input_tokens("glm-5.3", "Long document").input_tokens)  # free pre-send token count
     first = llm.respond("glm-5.3", "Capital of Türkiye?")             # Responses API
     print(llm.respond("glm-5.3", "Population?", previous_response_id=first.id).output_text)
+    mod = llm.moderate("qwen3-guard-4b", "Text to screen")            # free endpoint
+    print(mod.flagged, mod.categories)
 ```
+
+### Terms of Service Gate
+
+The gateway requires a one-time acceptance of the terms of use per account;
+until accepted, every call returns `403 terms_not_accepted`. The SDK manages
+this flow:
+
+```python
+with EvrenLLMClient() as llm:
+    status = llm.terms_status()          # acceptance state + current version
+    text = llm.terms_text()              # read before accepting
+    llm.accept_terms()                   # accepts current version (or accept_terms(version))
+    llm.ensure_terms_accepted()          # no-op if accepted, otherwise reads + accepts
+```
+
+Call `ensure_terms_accepted()` before your first request to avoid
+`LLMTermsNotAcceptedError`. When a new material version is published the gate
+asks for acceptance again — check `terms_status().needs_accept`.
 
 The gateway does not accept `Idempotency-Key` on the audio endpoints, so
 `transcribe()` and `speak()` are retried only when the connection could not be
@@ -866,8 +917,12 @@ except InferenceError:
 | `transcribe(model, audio, response_format=)` | `/v1/audio/transcriptions` | `Transcription` |
 | `speak(model, text, voice=, response_format=, instructions=)` | `/v1/audio/speech` | `SpeechResult` |
 | `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
+| `delete_response(id)` / `response_input_items(id)` | `/v1/responses/{id}` | `None` / `ResponseInputItems` |
+| `moderate(model, text)` | `/v1/moderations` | `ModerationResult` |
+| `terms_status()` / `terms_text()` / `accept_terms()` / `ensure_terms_accepted()` | `/v1/terms/*` | `TermsStatus` / `str` / `TermsAcceptance` |
+| `response_input_tokens(model, input, **kw)` | `/v1/responses/input_tokens` | `InputTokensResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
-| `quota()` | `/v1/quota` | `QuotaStatus` |
+| `quota(model=None)` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
 `encode_image(source, max_side=None)` turns a path, bytes or `data:` URL into the

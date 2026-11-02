@@ -97,9 +97,18 @@ class LLMConflictError(EvrenLLMError):
     """409 — aynı Idempotency-Key ile çakışan istek."""
 
 
+class LLMTermsNotAcceptedError(EvrenLLMError):
+    """403 `terms_not_accepted` — anahtar geçerli, kullanım şartları henüz onaylanmamış.
+
+    `client.ensure_terms_accepted()` çağrısı bu hatayı önceden çözer.
+    """
+
+
 def _error_class(status: int, code: str | None, etype: str | None) -> type[EvrenLLMError]:
     if etype == "insufficient_quota" or status == 402:
         return LLMInsufficientCreditsError
+    if code == "terms_not_accepted":
+        return LLMTermsNotAcceptedError
     if status in (401, 403):
         return LLMAuthenticationError
     if status == 404:
