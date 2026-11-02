@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `create_dataset(name, modality=, visibility=, license=, tags=)` (`POST /datasets`): şimdiye kadar istemcide hiç karşılığı olmayan bir uç — var olan bir veri setine dosya yüklemek için `upload_to_dataset()` vardı, ama yeni bir veri seti oluşturmanın API karşılığı yoktu. `modality="NLP"` dahil platformun kabul ettiği tüm modaliteler desteklenir (web formu yalnızca vision/medical gösterir, API daha geniş). `EvrenClient` ve `AsyncEvrenClient`'ta
+- `upload_to_dataset()`: artık yalnızca görsel değil, herhangi bir dosya (NLP/tablo veri setleri için `.jsonl`/`.csv`/`.txt`/vb.) yüklenebilir — dahili mime tahmini artık dosya uzantısına göre yapılıyor, görsel olmayan dosyalar için `image/jpeg` gibi yanlış bir türe düşmüyor. Parametre adı `image` → `file` olarak güncellendi (konumsal çağrılar etkilenmez)
+- `get_model(model)`: tek bir modelin kaydı (`GET /v1/models/{model}`) — görev, modalite, sahip ve fiyat alanlarıyla `LLMModel` döner; senkron ve asenkron istemcilerde
+- `response_input_tokens()`: girdinin kaç token tutacağını istekten önce sayar (`POST /v1/responses/input_tokens`) — ücretsiz uç, günlük kotaya yazılmaz. `instructions`, araç şemaları ve `previous_response_id` zinciri sayılır; `auto` ile çalışmaz. `InputTokensResult.input_tokens`
+- `quota(model=)`: `GET /v1/quota?model=<api_name>` — yanıt eşzamanlılık alanlarını da doldurur: `QuotaStatus.concurrency_limit`, `concurrent_requests` ve model yoğunken `model_concurrency_limit`. Argsüz çağrı önceki sürümlerle birebir aynı kalır
+- Kullanım şartları kapısı: `terms_status()` (`/v1/terms/status`), `terms_text()` (`/v1/terms/text`), `accept_terms(version=None)` (`/v1/terms/accept`) ve tek çağrılık `ensure_terms_accepted()` yardımcısı. Onaysız hesabın her çağrısı `403 terms_not_accepted` döner; hata artık `LLMTermsNotAcceptedError` olarak ayrı sınıfa eşlenir (yanlış `LLMAuthenticationError` yerine)
+- `moderate()`: metin içerik denetimi (`POST /v1/moderations`, `qwen3-guard-4b`) — ücretsiz uç, günlük kotaya yazılmaz. `ModerationResult.flagged/categories/scores`
+- `delete_response(id)` (`DELETE /v1/responses/{id}`) ve `response_input_items(id, limit=, after=)` (`GET /v1/responses/{id}/input_items`, sayfalı)
+- Hepsi `AsyncEvrenLLMClient` üzerinde de mevcut
+
 ## [0.11.0] - 2026-10-18
 
 ### Added

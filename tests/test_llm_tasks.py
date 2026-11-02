@@ -249,3 +249,223 @@ def test_encode_image_shrink():
         assert img.size == (1024, 683)
     with pytest.raises(ValueError, match="açılamadı"):
         encode_image(b"not an image", max_side=1024)
+
+
+def test_terms_flow():
+    """status -> text -> accept akışı; `ensure_terms_accepted()` ikinci kez kabul etmez."""
+    state = {"accepted": False}
+    calls = []
+
+    def h(req):
+        calls.append((req.method, req.url.path))
+        if req.url.path == "/v1/terms/status":
+            return httpx.Response(200, json={"current_version": 1, "accepted": state["accepted"],
+                                             "is_material": True, "doc_path": "docs/legal/LLM_TERMS_v1.md"})
+        if req.url.path == "/v1/terms/text":
+            return httpx.Response(200, json={"version": 1, "content": "# Şartlar", "doc_path": "x.md"})
+        assert req.url.path == "/v1/terms/accept" and req.method == "POST"
+        state["accepted"] = True
+        return httpx.Response(200, json={"accepted_version": 1, "accepted_at": "2026-11-02T00:00:00Z"})
+
+    c = _client(h)
+    status = c.terms_status()
+    assert status.current_version == 1 and status.needs_accept and status.is_material
+
+    text = c.terms_text()
+    assert text == "# Şartlar"
+
+    acc = c.ensure_terms_accepted()
+    assert acc is not None and acc.accepted_version == 1 and acc.accepted_at
+    assert c.ensure_terms_accepted() is None  # status artık accepted=True döner
+    assert ("POST", "/v1/terms/accept") in calls
+
+
+def test_accept_terms_explicit_version():
+    seen = {}
+
+    def h(req):
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json={"accepted_version": 7, "accepted_at": "t"})
+
+    r = _client(h).accept_terms(7)
+    assert seen == {"version": 7} and r.accepted_version == 7
+
+
+def test_terms_not_accepted_maps_to_dedicated_error():
+    from evren_sdk import LLMTermsNotAcceptedError
+
+    resp = httpx.Response(403, json={"error": {"message": "Kullanım şartları onaylanmamış",
+                                               "code": "terms_not_accepted", "type": "forbidden"}})
+
+    def h(req):
+        assert req.url.path == "/v1/chat/completions"
+        return resp
+
+    with pytest.raises(LLMTermsNotAcceptedError, match="şart"):
+        _client(h).chat("glm-5.3", [{"role": "user", "content": "x"}])
+
+
+def test_moderate():
+    seen = {}
+
+    def h(req):
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json={"model": "qwen3-guard-4b", "results": [{
+            "flagged": True, "categories": {"violence": True}, "category_scores": {"violence": 0.93, "self-harm": 0.1},
+        }]}, headers={"x-request-id": "m1"})
+
+    r = _client(h).moderate("qwen3-guard-4b", "ttrl")
+
+    assert seen["model"] == "qwen3-guard-4b" and seen["input"] == "ttrl"
+    assert r.flagged and r.categories == {"violence": True}
+    assert r.scores == {"violence": 0.93, "self-harm": 0.1} and r.request_id == "m1"
+
+
+def test_moderate_empty_results():
+    r = _client(lambda req: httpx.Response(200, json={"model": "qwen3-guard-4b", "results": []})) \
+        .moderate("qwen3-guard-4b", "x")
+    assert r.flagged is False and r.categories == {}
+
+
+def test_response_input_items_and_delete():
+    body = {"object": "list", "data": [{"type": "message", "role": "user"}], "first_id": "ii_1",
+            "last_id": "ii_2", "has_more": True}
+    seen = []
+
+    def h(req):
+        seen.append((req.method, str(req.url)))
+        if req.method == "DELETE":
+            return httpx.Response(200, json={"deleted": True})
+        return httpx.Response(200, json=body)
+
+    c = _client(h)
+    items = c.response_input_items("resp_1", limit=10, after="ii_0")
+    assert items.items[0]["type"] == "message" and items.first_id == "ii_1" and items.has_more
+    assert "limit=10" in seen[0][1] and "after=ii_0" in seen[0][1]
+
+    c.delete_response("resp_1")
+    assert seen[1][0] == "DELETE" and seen[1][1].endswith("/v1/responses/resp_1")
+
+
+@pytest.mark.asyncio
+async def test_async_terms_and_moderate():
+    state = {"accepted": False}
+
+    def h(req):
+        if req.url.path == "/v1/terms/status":
+            return httpx.Response(200, json={"current_version": 3, "accepted": state["accepted"]})
+        if req.url.path == "/v1/terms/accept":
+            state["accepted"] = True
+            return httpx.Response(200, json={"accepted_version": 3, "accepted_at": "t"})
+        return httpx.Response(200, json={"model": "qwen3-guard-4b", "results": [{"flagged": False}]})
+
+    async with AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(h)) as c:
+        acc = await c.ensure_terms_accepted()
+        assert acc is not None and acc.accepted_version == 3
+        assert (await c.ensure_terms_accepted()) is None
+
+        r = await c.moderate("qwen3-guard-4b", "selam")
+        assert r.flagged is False
+
+
+def test_response_input_tokens():
+    """`/v1/responses/input_tokens` — ücretsiz uç; instructions ve araç şemaları sayılır."""
+    body = {"object": "response.input_tokens", "input_tokens": 4210}
+    seen = {}
+
+    def h(req):
+        assert req.method == "POST" and req.url.path == "/v1/responses/input_tokens"
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json=body)
+
+    r = _client(h).response_input_tokens(
+        "glm-5.3", "Uzun bir belge özeti...", instructions="Kısa yanıt ver.", previous_response_id="resp_9",
+    )
+    assert r.input_tokens == 4210 and r.raw["object"] == "response.input_tokens"
+    assert seen["model"] == "glm-5.3" and seen["instructions"] == "Kısa yanıt ver."
+    assert seen["previous_response_id"] == "resp_9" and "input" in seen
+
+
+def test_response_input_tokens_minimal():
+    body = {"object": "response.input_tokens", "input_tokens": 7}
+
+    r = _client(lambda req: httpx.Response(200, json=body)).response_input_tokens("auto", "Merhaba")
+    assert r.input_tokens == 7
+
+
+def test_quota_with_model():
+    """`GET /v1/quota?model=<id>` — model bazlı eşzamanlılık sınırları."""
+    body = {"level": "ok", "remaining_cr": "1000", "held_cr": "0",
+            "concurrency_limit": 8, "concurrent_requests": 3, "model_concurrency_limit": 4}
+    seen = {}
+
+    def h(req):
+        assert req.method == "GET"
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json=body)
+
+    q = _client(h).quota(model="glm-5.3")
+    assert q.concurrency_limit == 8 and q.concurrent_requests == 3 and q.model_concurrency_limit == 4
+    assert seen["url"].endswith("/v1/quota?model=glm-5.3")
+    assert q.level == "ok" and q.remaining_cr == 1000.0
+
+
+def test_quota_without_model_has_no_query():
+    body = {"level": "ok", "remaining_cr": "1000", "held_cr": "0", "concurrency_limit": 5, "concurrent_requests": 0}
+    seen = {}
+
+    def h(req):
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json=body)
+
+    q = _client(h).quota()
+    assert "?" not in seen["url"]  # geriye dönük uyum: argsüz çağrı sorgu dizgisiz
+    assert q.concurrency_limit == 5 and q.model_concurrency_limit is None
+
+
+@pytest.mark.asyncio
+async def test_async_input_tokens_and_quota_model():
+    def h(req):
+        if req.url.path == "/v1/responses/input_tokens":
+            return httpx.Response(200, json={"object": "response.input_tokens", "input_tokens": 99})
+        return httpx.Response(200, json={"level": "ok", "remaining_cr": "1", "held_cr": "0",
+                                         "concurrency_limit": 2, "concurrent_requests": 1})
+
+    async with AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(h)) as c:
+        r = await c.response_input_tokens("deepseek-v4.1-flash", "selam")
+        assert r.input_tokens == 99
+        q = await c.quota(model="deepseek-v4.1-flash")
+        assert q.concurrency_limit == 2 and q.concurrent_requests == 1
+
+
+def test_get_model():
+    seen = {}
+
+    def h(req):
+        seen["method"] = req.method
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json={"id": "clef", "task": "decision",
+                                         "modalities": ["text", "image"], "owned_by": "cloudflare",
+                                         "created": 3, "pricing": {"input": "0"}})
+
+    m = _client(h).get_model("clef")
+    assert seen["method"] == "GET" and seen["url"].endswith("/v1/models/clef")
+    assert m.id == "clef" and m.task == "decision" and "image" in m.modalities
+    assert m.owned_by == "cloudflare" and m.pricing == {"input": "0"}
+
+
+def test_get_model_minimal():
+    m = _client(lambda req: httpx.Response(200, json={"id": "glm-5.3"})).get_model("glm-5.3")
+    assert m.task == "chat" and m.modalities == ["text"] and m.owned_by == "evren"
+    assert m.created == 0 and m.pricing is None
+
+
+@pytest.mark.asyncio
+async def test_async_get_model():
+    def h(req):
+        assert req.method == "GET" and req.url.path == "/v1/models/qwen3-embedding-8b"
+        return httpx.Response(200, json={"id": "qwen3-embedding-8b", "task": "embedding"})
+
+    async with AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(h)) as c:
+        m = await c.get_model("qwen3-embedding-8b")
+        assert m.task == "embedding" and m.id == "qwen3-embedding-8b"
