@@ -249,3 +249,120 @@ def test_encode_image_shrink():
         assert img.size == (1024, 683)
     with pytest.raises(ValueError, match="açılamadı"):
         encode_image(b"not an image", max_side=1024)
+
+
+def test_terms_flow():
+    """status -> text -> accept akışı; `ensure_terms_accepted()` ikinci kez kabul etmez."""
+    state = {"accepted": False}
+    calls = []
+
+    def h(req):
+        calls.append((req.method, req.url.path))
+        if req.url.path == "/v1/terms/status":
+            return httpx.Response(200, json={"current_version": 1, "accepted": state["accepted"],
+                                             "is_material": True, "doc_path": "docs/legal/LLM_TERMS_v1.md"})
+        if req.url.path == "/v1/terms/text":
+            return httpx.Response(200, json={"version": 1, "content": "# Şartlar", "doc_path": "x.md"})
+        assert req.url.path == "/v1/terms/accept" and req.method == "POST"
+        state["accepted"] = True
+        return httpx.Response(200, json={"accepted_version": 1, "accepted_at": "2026-11-02T00:00:00Z"})
+
+    c = _client(h)
+    status = c.terms_status()
+    assert status.current_version == 1 and status.needs_accept and status.is_material
+
+    text = c.terms_text()
+    assert text == "# Şartlar"
+
+    acc = c.ensure_terms_accepted()
+    assert acc is not None and acc.accepted_version == 1 and acc.accepted_at
+    assert c.ensure_terms_accepted() is None  # status artık accepted=True döner
+    assert ("POST", "/v1/terms/accept") in calls
+
+
+def test_accept_terms_explicit_version():
+    seen = {}
+
+    def h(req):
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json={"accepted_version": 7, "accepted_at": "t"})
+
+    r = _client(h).accept_terms(7)
+    assert seen == {"version": 7} and r.accepted_version == 7
+
+
+def test_terms_not_accepted_maps_to_dedicated_error():
+    from evren_sdk import LLMTermsNotAcceptedError
+
+    resp = httpx.Response(403, json={"error": {"message": "Kullanım şartları onaylanmamış",
+                                               "code": "terms_not_accepted", "type": "forbidden"}})
+
+    def h(req):
+        assert req.url.path == "/v1/chat/completions"
+        return resp
+
+    with pytest.raises(LLMTermsNotAcceptedError, match="şart"):
+        _client(h).chat("glm-5.3", [{"role": "user", "content": "x"}])
+
+
+def test_moderate():
+    seen = {}
+
+    def h(req):
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json={"model": "qwen3-guard-4b", "results": [{
+            "flagged": True, "categories": {"violence": True}, "category_scores": {"violence": 0.93, "self-harm": 0.1},
+        }]}, headers={"x-request-id": "m1"})
+
+    r = _client(h).moderate("qwen3-guard-4b", "ttrl")
+
+    assert seen["model"] == "qwen3-guard-4b" and seen["input"] == "ttrl"
+    assert r.flagged and r.categories == {"violence": True}
+    assert r.scores == {"violence": 0.93, "self-harm": 0.1} and r.request_id == "m1"
+
+
+def test_moderate_empty_results():
+    r = _client(lambda req: httpx.Response(200, json={"model": "qwen3-guard-4b", "results": []})) \
+        .moderate("qwen3-guard-4b", "x")
+    assert r.flagged is False and r.categories == {}
+
+
+def test_response_input_items_and_delete():
+    body = {"object": "list", "data": [{"type": "message", "role": "user"}], "first_id": "ii_1",
+            "last_id": "ii_2", "has_more": True}
+    seen = []
+
+    def h(req):
+        seen.append((req.method, str(req.url)))
+        if req.method == "DELETE":
+            return httpx.Response(200, json={"deleted": True})
+        return httpx.Response(200, json=body)
+
+    c = _client(h)
+    items = c.response_input_items("resp_1", limit=10, after="ii_0")
+    assert items.items[0]["type"] == "message" and items.first_id == "ii_1" and items.has_more
+    assert "limit=10" in seen[0][1] and "after=ii_0" in seen[0][1]
+
+    c.delete_response("resp_1")
+    assert seen[1][0] == "DELETE" and seen[1][1].endswith("/v1/responses/resp_1")
+
+
+@pytest.mark.asyncio
+async def test_async_terms_and_moderate():
+    state = {"accepted": False}
+
+    def h(req):
+        if req.url.path == "/v1/terms/status":
+            return httpx.Response(200, json={"current_version": 3, "accepted": state["accepted"]})
+        if req.url.path == "/v1/terms/accept":
+            state["accepted"] = True
+            return httpx.Response(200, json={"accepted_version": 3, "accepted_at": "t"})
+        return httpx.Response(200, json={"model": "qwen3-guard-4b", "results": [{"flagged": False}]})
+
+    async with AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(h)) as c:
+        acc = await c.ensure_terms_accepted()
+        assert acc is not None and acc.accepted_version == 3
+        assert (await c.ensure_terms_accepted()) is None
+
+        r = await c.moderate("qwen3-guard-4b", "selam")
+        assert r.flagged is False

@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Kullanım şartları kapısı: `terms_status()` (`/v1/terms/status`), `terms_text()` (`/v1/terms/text`), `accept_terms(version=None)` (`/v1/terms/accept`) ve tek çağrılık `ensure_terms_accepted()` yardımcısı. Onaysız hesabın her çağrısı `403 terms_not_accepted` döner; hata artık `LLMTermsNotAcceptedError` olarak ayrı sınıfa eşlenir (yanlış `LLMAuthenticationError` yerine)
+- `moderate()`: metin içerik denetimi (`POST /v1/moderations`, `qwen3-guard-4b`) — ücretsiz uç, günlük kotaya yazılmaz. `ModerationResult.flagged/categories/scores`
+- `delete_response(id)` (`DELETE /v1/responses/{id}`) ve `response_input_items(id, limit=, after=)` (`GET /v1/responses/{id}/input_items`, sayfalı)
+- Hepsi `AsyncEvrenLLMClient` üzerinde de mevcut
+
 ## [0.11.0] - 2026-10-18
 
 ### Added

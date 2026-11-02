@@ -151,6 +151,59 @@ class ResponseResult:
     meta: ResponseMeta = field(default_factory=ResponseMeta)
 
 
+@dataclass(slots=True)
+class TermsStatus:
+    """`/v1/terms/status` kaydı. Şartlar kabul edilmeden geçit her çağrıya 403 döner."""
+
+    current_version: int
+    accepted: bool
+    is_material: bool | None = None
+    doc_path: str | None = None
+
+    @property
+    def needs_accept(self) -> bool:
+        """`True` ise ilk çağrıdan önce `accept_terms()` gerekir."""
+        return not self.accepted
+
+
+@dataclass(slots=True)
+class TermsAcceptance:
+    """`accept_terms()` sonucu."""
+
+    accepted_version: int
+    accepted_at: str | None = None
+
+
+@dataclass(slots=True)
+class ModerationResult:
+    """`/v1/moderations` sonucu — ücretsiz uç, günlük kotaya yazılmaz.
+
+    `flagged` modelin genel kararıdır; `categories` risk kategorilerini, `scores`
+    kategori başına olasılıkları taşır. Alan adları OpenAI moderasyon biçimini izler.
+    """
+
+    flagged: bool
+    model: str
+    categories: dict[str, bool] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
+    meta: ResponseMeta = field(default_factory=ResponseMeta)
+
+    @property
+    def request_id(self) -> str | None:
+        return self.meta.request_id
+
+
+@dataclass(slots=True)
+class ResponseInputItems:
+    """`GET /v1/responses/{id}/input_items` — o turda gönderilen girdi ögeleri, sayfalı."""
+
+    items: list[JSON] = field(default_factory=list)
+    first_id: str | None = None
+    last_id: str | None = None
+    has_more: bool = False
+    raw: JSON = field(default_factory=dict)
+
+
 def decision_body(
     model: str, state: Any, questions: JSON, images: Iterable[ImageSource] | None, extra: JSON,
 ) -> JSON:
@@ -267,4 +320,35 @@ def parse_response(body: JSON, headers: httpx.Headers, requested_model: str) -> 
         id=body.get("id"), output_text=str(body.get("output_text") or _output_text(output)),
         model=str(body.get("model") or requested_model), output=output, usage=dict(body.get("usage") or {}),
         previous_response_id=body.get("previous_response_id"), raw=body, meta=parse_meta(headers),
+    )
+
+
+def parse_terms_status(body: JSON) -> TermsStatus:
+    return TermsStatus(
+        current_version=int(body.get("current_version") or 0), accepted=bool(body.get("accepted")),
+        is_material=body.get("is_material"), doc_path=body.get("doc_path"),
+    )
+
+
+def parse_terms_acceptance(body: JSON) -> TermsAcceptance:
+    return TermsAcceptance(
+        accepted_version=int(body.get("accepted_version") or 0), accepted_at=body.get("accepted_at"),
+    )
+
+
+def parse_moderation(body: JSON, headers: httpx.Headers, requested_model: str) -> ModerationResult:
+    results = body.get("results") or []
+    top = results[0] if results else {}
+    categories = {str(k): bool(v) for k, v in (top.get("categories") or {}).items()}
+    scores = {str(k): float(v) for k, v in (top.get("category_scores") or {}).items() if isinstance(v, (int, float))}
+    return ModerationResult(
+        flagged=bool(top.get("flagged")), model=str(body.get("model") or requested_model),
+        categories=categories, scores=scores, meta=parse_meta(headers),
+    )
+
+
+def parse_input_items(body: JSON) -> ResponseInputItems:
+    return ResponseInputItems(
+        items=list(body.get("data") or []), first_id=body.get("first_id"),
+        last_id=body.get("last_id"), has_more=bool(body.get("has_more")), raw=body,
     )
