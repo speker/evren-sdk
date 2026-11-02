@@ -88,6 +88,60 @@ class _FakeWS:
         pass
 
 
+def test_create_dataset_posts_modality_and_license():
+    seen = {}
+
+    def h(req):
+        if req.url.path.endswith("/datasets"):
+            seen["body"] = json.loads(req.content)
+            return httpx.Response(201, json={
+                "id": "01a19e24-f383-7512-8149-d61669b73cf4",
+                "name": "pasuk-torah-verses-en-he", "modality": "NLP"})
+        raise AssertionError(req.url.path)
+
+    r = _client(h).create_dataset(
+        "pasuk-torah-verses-en-he", modality="NLP",
+        visibility="public", license="CC0-1.0")
+    assert seen["body"] == {
+        "name": "pasuk-torah-verses-en-he", "modality": "NLP",
+        "visibility": "public", "license": "CC0-1.0"}
+    assert r["id"] == "01a19e24-f383-7512-8149-d61669b73cf4"
+    assert r["modality"] == "NLP"
+
+
+def test_upload_to_dataset_nlp_file_gets_json_mime(tmp_path):
+    f = tmp_path / "verses.jsonl"
+    f.write_bytes(b'{"id": "Genesis.1.1"}\n')
+    seen_put_mime = {}
+
+    def h(req):
+        path = req.url.path
+        if path.endswith("/upload/presign"):
+            return httpx.Response(200, json={"presigned_urls": [
+                {"filename": "verses.jsonl", "object_key": "ds/1/verses.jsonl"}]})
+        if "/upload/put" in path:
+            seen_put_mime["content-type"] = req.headers["content-type"]
+            return httpx.Response(200, json={"ok": True})
+        if path.endswith("/upload/confirm"):
+            return httpx.Response(201, json={"created": 1})
+        raise AssertionError(path)
+
+    r = _client(h).upload_to_dataset("ds-1", f)
+    assert seen_put_mime["content-type"] == "application/json"
+    assert r["created"] == 1
+
+
+def test_upload_to_dataset_duplicate():
+    def h(req):
+        if req.url.path.endswith("/upload/presign"):
+            return httpx.Response(200, json={"presigned_urls": [], "duplicates": ["x"]})
+        raise AssertionError(req.url.path)
+
+    r = _client(h).upload_to_dataset("ds-1", b"raw-bytes")
+    assert r["duplicate"] is True
+    assert r["duplicates"] == ["x"]
+
+
 def test_pipeline_inflight_cap():
     ws = InferenceWSClient("k", VID)
     fake = _FakeWS()

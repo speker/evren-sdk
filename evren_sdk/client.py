@@ -120,6 +120,24 @@ def _read_img(source: str | Path | bytes) -> tuple[bytes, str, str]:
     return p.read_bytes(), p.name, mime
 
 
+_FILE_MIME = {
+    **_MIME,
+    ".json": "application/json", ".jsonl": "application/json",
+    ".csv": "text/csv", ".tsv": "text/tab-separated-values",
+    ".txt": "text/plain", ".parquet": "application/octet-stream",
+    ".npy": "application/octet-stream", ".zip": "application/zip",
+}
+
+
+def _read_file(source: str | Path | bytes) -> tuple[bytes, str, str]:
+    """`_read_img` ile aynı sözleşim ama görsel-dışı veri setleri için (NLP/tablo/vb.) dogru dusup varsayılan mime döner, görsel tahmini dayatmaz."""
+    if isinstance(source, bytes):
+        return source, "data.bin", "application/octet-stream"
+    p = Path(source)
+    mime = _FILE_MIME.get(p.suffix.lower(), "application/octet-stream")
+    return p.read_bytes(), p.name, mime
+
+
 def _is_uuid(val: str) -> bool:
     try:
         uuid.UUID(val)
@@ -539,11 +557,43 @@ class EvrenClient:
             total_predictions=total_preds,
         )
 
+    def create_dataset(self, name: str, *, modality: str = "VISION",
+                       description: str | None = None,
+                       visibility: str = "private",
+                       license: str | None = None,
+                       tags: list[str] | None = None) -> JSON:
+        """Yeni veri seti olusturur.
+
+        Args:
+            name: veri seti adi (slug buradan turetilir).
+            modality: "VISION", "NLP", vb. (web formu sadece vision/medical
+                gosterir ama API NLP de kabul eder).
+            visibility: "private" veya "public".
+            license: "MIT", "Apache-2.0", "CC-BY-4.0", "CC-BY-SA-4.0",
+                "CC-BY-NC-4.0", "CC0-1.0", "custom" veya "unlicensed".
+        """
+        body: JSON = {"name": name, "modality": modality, "visibility": visibility}
+        if description is not None:
+            body["description"] = description
+        if license is not None:
+            body["license"] = license
+        if tags is not None:
+            body["tags"] = tags
+        r = self._http.post("/datasets", json=body)
+        if r.status_code not in (200, 201):
+            _raise_for(r)
+        created: JSON = _unwrap(r.json())
+        return created
+
     def upload_to_dataset(self, dataset_id: str,
-                          image: str | Path | bytes) -> JSON:
-        """Görseli veri setine yükler (presign -> upload -> confirm)."""
+                          file: str | Path | bytes) -> JSON:
+        """Dosyayi veri setine yukler (presign -> upload -> confirm).
+
+        Gorsel veri setleri icin oldugu gibi NLP/tablo veri setleri icin de
+        kullanilabilir (dosya uzantisina gore mime turu tahmin edilir).
+        """
         import hashlib
-        raw, name, mime = _read_img(image)
+        raw, name, mime = _read_file(file)
         sha = hashlib.sha256(raw).hexdigest()
 
         r1 = self._http.post(
@@ -829,11 +879,34 @@ class AsyncEvrenClient:
             total_predictions=total_preds,
         )
 
+    async def create_dataset(self, name: str, *, modality: str = "VISION",
+                             description: str | None = None,
+                             visibility: str = "private",
+                             license: str | None = None,
+                             tags: list[str] | None = None) -> JSON:
+        """Yeni veri seti olusturur (bkz. `EvrenClient.create_dataset`)."""
+        body: JSON = {"name": name, "modality": modality, "visibility": visibility}
+        if description is not None:
+            body["description"] = description
+        if license is not None:
+            body["license"] = license
+        if tags is not None:
+            body["tags"] = tags
+        r = await self._http.post("/datasets", json=body)
+        if r.status_code not in (200, 201):
+            _raise_for(r)
+        created: JSON = _unwrap(r.json())
+        return created
+
     async def upload_to_dataset(self, dataset_id: str,
-                                image: str | Path | bytes) -> JSON:
-        """Görseli veri setine yükler (presign -> upload -> confirm)."""
+                                file: str | Path | bytes) -> JSON:
+        """Dosyayi veri setine yukler (presign -> upload -> confirm).
+
+        Gorsel veri setleri icin oldugu gibi NLP/tablo veri setleri icin de
+        kullanilabilir (dosya uzantisina gore mime turu tahmin edilir).
+        """
         import hashlib
-        raw, name, mime = _read_img(image)
+        raw, name, mime = _read_file(file)
         sha = hashlib.sha256(raw).hexdigest()
 
         r1 = await self._http.post(
