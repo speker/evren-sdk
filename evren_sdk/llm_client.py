@@ -40,6 +40,7 @@ from .llm_tasks import (
     parse_decision_batch,
     parse_input_items,
     parse_input_tokens,
+    parse_model,
     parse_models,
     parse_moderation,
     parse_ocr,
@@ -218,6 +219,10 @@ class EvrenLLMClient:
     def models(self) -> list[LLMModel]:
         """Anahtarın erişebildiği modeller, görev (`task`) ve modaliteleriyle."""
         return parse_models(self._send("GET", "/v1/models").json())
+
+    def get_model(self, model: str) -> LLMModel:
+        """Tek bir modelin kaydı (`GET /v1/models/{model}`) — görev, modalite, sahip, fiyat."""
+        return parse_model(self._send("GET", f"/v1/models/{model}").json())
 
     def decide(
         self, model: str, state: Any, questions: dict[str, Any], *, images: list[ImageSource] | None = None,

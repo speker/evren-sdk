@@ -268,14 +268,20 @@ def _float(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
+def _parse_model(m: JSON) -> LLMModel:
+    return LLMModel(
+        id=str(m["id"]), task=str(m.get("task") or "chat"), modalities=list(m.get("modalities") or ["text"]),
+        owned_by=str(m.get("owned_by") or "evren"), created=int(m.get("created") or 0), pricing=m.get("pricing"),
+    )
+
+
 def parse_models(body: JSON) -> list[LLMModel]:
-    return [
-        LLMModel(
-            id=str(m["id"]), task=str(m.get("task") or "chat"), modalities=list(m.get("modalities") or ["text"]),
-            owned_by=str(m.get("owned_by") or "evren"), created=int(m.get("created") or 0), pricing=m.get("pricing"),
-        )
-        for m in body.get("data") or []
-    ]
+    return [_parse_model(m) for m in body.get("data") or []]
+
+
+def parse_model(body: JSON) -> LLMModel:
+    """`GET /v1/models/{model}` kaydı — tek bir modelin görev/modalite/fiyat bilgisi."""
+    return _parse_model(body)
 
 
 def parse_decision(body: JSON, headers: httpx.Headers | None, requested_model: str) -> DecisionResult:

@@ -436,3 +436,36 @@ async def test_async_input_tokens_and_quota_model():
         assert r.input_tokens == 99
         q = await c.quota(model="deepseek-v4.1-flash")
         assert q.concurrency_limit == 2 and q.concurrent_requests == 1
+
+
+def test_get_model():
+    seen = {}
+
+    def h(req):
+        seen["method"] = req.method
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json={"id": "clef", "task": "decision",
+                                         "modalities": ["text", "image"], "owned_by": "cloudflare",
+                                         "created": 3, "pricing": {"input": "0"}})
+
+    m = _client(h).get_model("clef")
+    assert seen["method"] == "GET" and seen["url"].endswith("/v1/models/clef")
+    assert m.id == "clef" and m.task == "decision" and "image" in m.modalities
+    assert m.owned_by == "cloudflare" and m.pricing == {"input": "0"}
+
+
+def test_get_model_minimal():
+    m = _client(lambda req: httpx.Response(200, json={"id": "glm-5.3"})).get_model("glm-5.3")
+    assert m.task == "chat" and m.modalities == ["text"] and m.owned_by == "evren"
+    assert m.created == 0 and m.pricing is None
+
+
+@pytest.mark.asyncio
+async def test_async_get_model():
+    def h(req):
+        assert req.method == "GET" and req.url.path == "/v1/models/qwen3-embedding-8b"
+        return httpx.Response(200, json={"id": "qwen3-embedding-8b", "task": "embedding"})
+
+    async with AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(h)) as c:
+        m = await c.get_model("qwen3-embedding-8b")
+        assert m.task == "embedding" and m.id == "qwen3-embedding-8b"

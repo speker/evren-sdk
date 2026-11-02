@@ -494,6 +494,7 @@ except InferenceError:
 | `terms_status()` / `terms_text()` / `accept_terms()` / `ensure_terms_accepted()` | `/v1/terms/*` | `TermsStatus` / `str` / `TermsAcceptance` |
 | `response_input_tokens(model, input, **kw)` | `/v1/responses/input_tokens` | `InputTokensResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
+| `get_model(model)` | `/v1/models/{model}` | `LLMModel` |
 | `quota(model=None)` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
@@ -922,6 +923,7 @@ except InferenceError:
 | `terms_status()` / `terms_text()` / `accept_terms()` / `ensure_terms_accepted()` | `/v1/terms/*` | `TermsStatus` / `str` / `TermsAcceptance` |
 | `response_input_tokens(model, input, **kw)` | `/v1/responses/input_tokens` | `InputTokensResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
+| `get_model(model)` | `/v1/models/{model}` | `LLMModel` |
 | `quota(model=None)` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
