@@ -1,0 +1,13 @@
+%% npx -p @mermaid-js/mermaid-cli mmdc -c mermaid.json -s 2 -b white -i architecture-tr.mmd -o architecture-tr.png
+graph LR
+    SDK["evren-sdk"] -->|HTTPS / TLS| GW["Görü API<br/>api.ssyz.org.tr"]
+    SDK -->|HTTPS / TLS| LLM["LLM Geçidi<br/>evren-llmapi.ssyz.org.tr"]
+    GW -->|gRPC| TS["Triton Server"]
+    TS --- GPU["8× A6000 GPU"]
+    SDK -.->|Edge Modu| DEV["Lokal Cihaz<br/>Webcam / RTSP / Video"]
+
+    subgraph INF["EVREN Çıkarım Kümesi"]
+        GW
+        TS
+        GPU
+    end

@@ -1,0 +1,7 @@
+%% npx -p @mermaid-js/mermaid-cli mmdc -c mermaid.json -s 2 -b white -i predict-flow-tr.mmd -o predict-flow-tr.png
+graph TD
+    IMG["Görsel<br/>dosya / Path / bytes"] --> P["predict()<br/>confidence, iou, image_size"]
+    P --> PR["PredictResult<br/>.count · .inference_ms<br/>.predictions[]"]
+    PR --> F["filter()"]
+    PR --> E["to_yolo() · to_coco() · to_csv()"]
+    PR --> S["save()<br/>.json · .csv · .txt"]

@@ -1,0 +1,6 @@
+%% npx -p @mermaid-js/mermaid-cli mmdc -c mermaid.json -s 2 -b white -i edge-en.mmd -o edge-en.png
+graph LR
+    CAM["Camera<br/>Webcam / RTSP / Video"] -->|frame| EC["EvrenCamera<br/>compress + send"]
+    EC -->|HTTPS| GPU["EVREN GPU<br/>Cluster"]
+    GPU -->|JSON| EC
+    EC -->|render| CAM

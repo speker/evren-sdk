@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://evren.ssyz.org.tr/logo.svg" alt="EVREN" width="180" />
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/logo.png" alt="EVREN" width="320" />
 </p>
 
 <h1 align="center">evren-sdk</h1>
@@ -12,12 +12,12 @@
   <a href="https://pypi.org/project/evren-sdk/"><img src="https://img.shields.io/pypi/v/evren-sdk?style=flat-square&color=10b981&label=pypi" alt="PyPI" /></a>
   <a href="https://pypi.org/project/evren-sdk/"><img src="https://img.shields.io/pypi/pyversions/evren-sdk?style=flat-square&color=3b82f6" alt="Python" /></a>
   <a href="https://github.com/speker/evren-sdk/blob/main/LICENSE"><img src="https://img.shields.io/github/license/speker/evren-sdk?style=flat-square&color=6366f1" alt="License" /></a>
-  <a href="https://github.com/speker/evren-sdk/actions"><img src="https://img.shields.io/github/actions/workflow/status/speker/evren-sdk/publish.yml?style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/speker/evren-sdk/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/speker/evren-sdk/test.yml?branch=main&style=flat-square&label=tests" alt="Tests" /></a>
   <img src="https://img.shields.io/badge/GPU-A6000_×_8-f59e0b?style=flat-square" alt="GPU" />
 </p>
 
 <p align="center">
-  <a href="#-türkçe">Türkçe</a> · <a href="#-english">English</a> · <a href="examples/">Examples</a> · <a href="CHANGELOG.md">Changelog</a>
+  <a href="#-türkçe">Türkçe</a> · <a href="#-english">English</a> · <a href="https://github.com/speker/evren-sdk/tree/main/examples">Examples</a> · <a href="https://github.com/speker/evren-sdk/blob/main/CHANGELOG.md">Changelog</a>
 </p>
 
 ---
@@ -34,22 +34,12 @@ EVREN Yapay Zeka Platformu'nun resmi Python SDK'sı: platformda eğitilmiş bilg
 
 ### Mimari
 
-```mermaid
-graph LR
-    SDK["🐍 Python SDK"] -->|HTTPS / TLS| GW["⚡ FastAPI Gateway"]
-    GW -->|gRPC| TS["🔮 Triton Server"]
-    TS --- GPU["🖥️ 8× A6000 GPU"]
-    SDK -.->|Edge Mode| DEV["📷 Lokal Cihaz\nWebcam / RTSP / Video"]
+<p align="center">
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/diagrams/architecture-tr.png" alt="EVREN SDK mimarisi" width="780" />
+</p>
 
-    subgraph EVREN Inference Cluster
-        GW
-        TS
-        GPU
-    end
-```
-
-Tek bir `predict()` cagrisi arkasinda 8× NVIDIA A6000 GPU calisiyor.
-Kullanici altyapi yonetmez — `pip install` ve 3 satir kod yeter.
+Tek bir `predict()` çağrısının arkasında 8× NVIDIA A6000 GPU çalışır.
+Kullanıcı altyapı yönetmez — `pip install` ve 3 satır kod yeter.
 
 ### Kurulum
 
@@ -70,7 +60,7 @@ for det in result.predictions:
     print(f"{det.class_name}: {det.confidence:.0%}  bbox={det.bbox}")
 ```
 
-Daha fazla ornek icin [`examples/`](examples/) dizinine bakin.
+Daha fazla örnek için [`examples/`](https://github.com/speker/evren-sdk/tree/main/examples) dizinine bakın.
 
 ### Kimlik Doğrulama
 
@@ -84,14 +74,9 @@ client = EvrenClient(api_key="eyJhbGci...")    # JWT token
 
 ### Çıkarım Akışı
 
-```mermaid
-graph TD
-    IMG["🖼️ Görsel\ndosya / Path / bytes"] --> P["predict()\nconfidence, iou, image_size"]
-    P --> PR["PredictResult\n.count  .inference_ms  .predictions[]"]
-    PR --> F["filter()"]
-    PR --> E["to_yolo() · to_coco() · to_csv()"]
-    PR --> S["save()\n.json  .csv  .txt"]
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/diagrams/predict-flow-tr.png" alt="Çıkarım akışı" width="520" />
+</p>
 
 ### Tekil Çıkarım
 
@@ -125,7 +110,7 @@ for r in batch:
     print(f"{r.count} tespit, {r.inference_ms:.0f} ms")
 ```
 
-Bkz. [`examples/02_batch_inference.py`](examples/02_batch_inference.py)
+Bkz. [`examples/02_batch_inference.py`](https://github.com/speker/evren-sdk/blob/main/examples/02_batch_inference.py)
 
 ### Sonuç İşleme & Export
 
@@ -146,7 +131,7 @@ result.save("sonuc.csv")
 result.save("labels.txt")
 ```
 
-Detay: [`examples/03_result_export.py`](examples/03_result_export.py)
+Detay: [`examples/03_result_export.py`](https://github.com/speker/evren-sdk/blob/main/examples/03_result_export.py)
 
 ### Model Bilgileri & Warmup
 
@@ -174,7 +159,7 @@ print(f"Min: {bench.min_ms:.1f}ms  |  Max: {bench.max_ms:.1f}ms")
 print(f"Throughput: {bench.throughput_fps:.1f} FPS")
 ```
 
-→ [`examples/04_benchmark.py`](examples/04_benchmark.py)
+→ [`examples/04_benchmark.py`](https://github.com/speker/evren-sdk/blob/main/examples/04_benchmark.py)
 
 ### Model İndirme
 
@@ -205,7 +190,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Paralel pipeline icin [`examples/07_async_pipeline.py`](examples/07_async_pipeline.py)
+Paralel pipeline için [`examples/07_async_pipeline.py`](https://github.com/speker/evren-sdk/blob/main/examples/07_async_pipeline.py)
 
 ### LLM Geçidi (Sohbet, Akış, Embedding, Rerank, Karar, OCR, Ses)
 
@@ -337,13 +322,9 @@ arasında birebir aynı ses garanti edilmez.
 GPU olmayan cihazlarda (Raspberry Pi, laptop, endüstriyel PC) gerçek zamanlı
 çıkarım. Çıkarım EVREN GPU'larında çalışır — lokal deneyim hissi verir.
 
-```mermaid
-graph LR
-    CAM["📷 Kamera\nWebcam / RTSP / Video"] -->|frame| EC["EvrenCamera\ncompress + send"]
-    EC -->|HTTPS| GPU["🖥️ EVREN GPU\nCluster"]
-    GPU -->|JSON| EC
-    EC -->|render| CAM
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/diagrams/edge-tr.png" alt="Edge modu akışı" width="760" />
+</p>
 
 ```bash
 pip install evren-sdk[edge]
@@ -355,7 +336,7 @@ from evren_sdk import EvrenCamera
 cam = EvrenCamera("evren_...", "kullanici/model", confidence=0.3)
 
 cam.run(0)                                      # webcam, ESC ile kapat
-cam.record("input.mp4", "output.mp4")           # video isle + kaydet
+cam.record("input.mp4", "output.mp4")           # video işle + kaydet
 
 for frame, result in cam.stream(0):             # kendi loop'unuz
     print(f"{result.count} tespit")
@@ -371,7 +352,7 @@ for path, result in cam.scan("images/"):        # klasör tarama
 | `draw` | `True` | Tahminleri frame üzerine çiz |
 | `confidence` | `0.25` | Minimum güven eşiği |
 
-Bkz. [`examples/05_edge_camera.py`](examples/05_edge_camera.py)
+Bkz. [`examples/05_edge_camera.py`](https://github.com/speker/evren-sdk/blob/main/examples/05_edge_camera.py)
 
 ### Hata Yönetimi
 
@@ -484,19 +465,9 @@ trained on EVREN and access to the EVREN LLM gateway (chat, streaming, embedding
 
 ### Architecture
 
-```mermaid
-graph LR
-    SDK["🐍 Python SDK"] -->|HTTPS / TLS| GW["⚡ FastAPI Gateway"]
-    GW -->|gRPC| TS["🔮 Triton Server"]
-    TS --- GPU["🖥️ 8× A6000 GPU"]
-    SDK -.->|Edge Mode| DEV["📷 Local Device\nWebcam / RTSP / Video"]
-
-    subgraph EVREN Inference Cluster
-        GW
-        TS
-        GPU
-    end
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/diagrams/architecture-en.png" alt="EVREN SDK architecture" width="780" />
+</p>
 
 A single `predict()` call leverages 8× NVIDIA A6000 GPUs.
 No infrastructure management — `pip install` and 3 lines of code.
@@ -520,7 +491,7 @@ for det in result.predictions:
     print(f"{det.class_name}: {det.confidence:.0%}  bbox={det.bbox}")
 ```
 
-See [`examples/`](examples/) for runnable scripts covering every feature.
+See [`examples/`](https://github.com/speker/evren-sdk/tree/main/examples) for runnable scripts covering every feature.
 
 ### Authentication
 
@@ -534,14 +505,9 @@ client = EvrenClient(api_key="eyJhbGci...")    # JWT token
 
 ### Inference Pipeline
 
-```mermaid
-graph TD
-    IMG["🖼️ Image\nfile / Path / bytes"] --> P["predict()\nconfidence, iou, image_size"]
-    P --> PR["PredictResult\n.count  .inference_ms  .predictions[]"]
-    PR --> F["filter()"]
-    PR --> E["to_yolo() · to_coco() · to_csv()"]
-    PR --> S["save()\n.json  .csv  .txt"]
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/diagrams/predict-flow-en.png" alt="Inference flow" width="520" />
+</p>
 
 ### Single Prediction
 
@@ -575,7 +541,7 @@ for r in batch:
     print(f"{r.count} detections, {r.inference_ms:.0f} ms")
 ```
 
-See [`examples/02_batch_inference.py`](examples/02_batch_inference.py)
+See [`examples/02_batch_inference.py`](https://github.com/speker/evren-sdk/blob/main/examples/02_batch_inference.py)
 
 ### Result Processing & Export
 
@@ -593,7 +559,7 @@ result.save("result.csv")
 result.save("labels.txt")
 ```
 
-Full example: [`examples/03_result_export.py`](examples/03_result_export.py)
+Full example: [`examples/03_result_export.py`](https://github.com/speker/evren-sdk/blob/main/examples/03_result_export.py)
 
 ### Model Info & Warmup
 
@@ -617,7 +583,7 @@ print(f"Avg: {bench.avg_ms:.1f}ms  |  p95: {bench.p95_ms:.1f}ms")
 print(f"Throughput: {bench.throughput_fps:.1f} FPS")
 ```
 
-→ [`examples/04_benchmark.py`](examples/04_benchmark.py)
+→ [`examples/04_benchmark.py`](https://github.com/speker/evren-sdk/blob/main/examples/04_benchmark.py)
 
 ### Model Download
 
@@ -648,7 +614,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Parallel pipeline: [`examples/07_async_pipeline.py`](examples/07_async_pipeline.py)
+Parallel pipeline: [`examples/07_async_pipeline.py`](https://github.com/speker/evren-sdk/blob/main/examples/07_async_pipeline.py)
 
 ### LLM Gateway (Chat, Streaming, Embeddings, Rerank, Decisions, OCR, Speech)
 
@@ -743,13 +709,9 @@ identical across calls.
 Real-time inference on devices without a GPU (Raspberry Pi, laptops,
 industrial PCs). Inference runs on EVREN cloud GPUs — the UX feels local.
 
-```mermaid
-graph LR
-    CAM["📷 Camera\nWebcam / RTSP / Video"] -->|frame| EC["EvrenCamera\ncompress + send"]
-    EC -->|HTTPS| GPU["🖥️ EVREN GPU\nCluster"]
-    GPU -->|JSON| EC
-    EC -->|render| CAM
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/speker/evren-sdk/v0.11.1/assets/diagrams/edge-en.png" alt="Edge mode flow" width="760" />
+</p>
 
 ```bash
 pip install evren-sdk[edge]
@@ -775,7 +737,7 @@ for path, result in cam.scan("images/"):        # folder scan
 | `draw` | `True` | Render predictions on frame |
 | `confidence` | `0.25` | Minimum confidence threshold |
 
-→ [`examples/05_edge_camera.py`](examples/05_edge_camera.py)
+→ [`examples/05_edge_camera.py`](https://github.com/speker/evren-sdk/blob/main/examples/05_edge_camera.py)
 
 ### Error Handling
 
@@ -881,13 +843,13 @@ embedded form the gateway accepts.
 
 | # | File | Description |
 |---|---|---|
-| 1 | [`01_quickstart.py`](examples/01_quickstart.py) | Temel tekil çıkarım / Basic single prediction |
-| 2 | [`02_batch_inference.py`](examples/02_batch_inference.py) | Toplu GPU çıkarım / Batch GPU inference |
-| 3 | [`03_result_export.py`](examples/03_result_export.py) | Filtreleme & export (YOLO, COCO, CSV, JSON) |
-| 4 | [`04_benchmark.py`](examples/04_benchmark.py) | Performans testi / Latency & throughput |
-| 5 | [`05_edge_camera.py`](examples/05_edge_camera.py) | Edge cihaz kamera / GPU-free real-time |
-| 6 | [`06_upload_to_dataset.py`](examples/06_upload_to_dataset.py) | Veri setine görsel yükleme / Upload images to dataset |
-| 7 | [`07_async_pipeline.py`](examples/07_async_pipeline.py) | Asenkron paralel çıkarım / Async pipeline |
+| 1 | [`01_quickstart.py`](https://github.com/speker/evren-sdk/blob/main/examples/01_quickstart.py) | Temel tekil çıkarım / Basic single prediction |
+| 2 | [`02_batch_inference.py`](https://github.com/speker/evren-sdk/blob/main/examples/02_batch_inference.py) | Toplu GPU çıkarım / Batch GPU inference |
+| 3 | [`03_result_export.py`](https://github.com/speker/evren-sdk/blob/main/examples/03_result_export.py) | Filtreleme & export (YOLO, COCO, CSV, JSON) |
+| 4 | [`04_benchmark.py`](https://github.com/speker/evren-sdk/blob/main/examples/04_benchmark.py) | Performans testi / Latency & throughput |
+| 5 | [`05_edge_camera.py`](https://github.com/speker/evren-sdk/blob/main/examples/05_edge_camera.py) | Edge cihaz kamera / GPU-free real-time |
+| 6 | [`06_upload_to_dataset.py`](https://github.com/speker/evren-sdk/blob/main/examples/06_upload_to_dataset.py) | Veri setine görsel yükleme / Upload images to dataset |
+| 7 | [`07_async_pipeline.py`](https://github.com/speker/evren-sdk/blob/main/examples/07_async_pipeline.py) | Asenkron paralel çıkarım / Async pipeline |
 
 ---
 
@@ -900,4 +862,4 @@ embedded form the gateway accepts.
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](https://github.com/speker/evren-sdk/blob/main/LICENSE)

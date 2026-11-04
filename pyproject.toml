@@ -62,6 +62,10 @@ artifacts = ["evren_sdk/_version.py"]
 [tool.hatch.build.targets.wheel]
 packages = ["evren_sdk"]
 
+[tool.hatch.build.targets.sdist]
+# README görselleri raw.githubusercontent'tan okunur, pakete girmez
+exclude = ["assets", ".github", "uv.lock"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100

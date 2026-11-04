@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.1] - 2026-11-04
+
+### Fixed
+- README: logo bağlantısı kırıktı (404); logo depoya alındı
+- README: Mermaid diyagramları PyPI'da ham kod olarak görünüyordu; diyagramlar görsele çevrildi (kaynakları `assets/diagrams/`), mimari diyagramına LLM geçidi eklendi
+- README: göreli bağlantılar (`examples/`, `CHANGELOG.md`, `LICENSE`) PyPI'da kırılıyordu; mutlak adrese çevrildi
+- README: CI rozeti yayın iş akışını gösteriyordu; test iş akışına bağlandı
+- README: Türkçe metinlerdeki eksik karakterler düzeltildi
+
+### Added
+- GitHub Actions: Python 3.10–3.13 üzerinde her PR'da ve `main`'e push'ta testler çalışır
+
 ## [0.11.0] - 2026-10-18
 
 ### Added
