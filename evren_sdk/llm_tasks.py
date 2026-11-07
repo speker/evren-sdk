@@ -17,8 +17,36 @@ from .llm_types import JSON, ResponseMeta, parse_meta
 
 
 @dataclass(slots=True)
+class LLMModelCapabilities:
+    """`/v1/models` ve `/v1/models/{model}` yanıtlarının `capabilities` alanı.
+
+    Hangi istek parametresinin bu modelde kabul edildiğini söyler; `400` almadan
+    önce denetlemek için kullanılır. Tüm alanlar geriye dönük uyum için `None`
+    varsayılanlıdır — eski bir geçit yanıtı bu alanı hiç döndürmeyebilir.
+    """
+
+    tools: bool | None = None
+    thinking: bool | None = None
+    reasoning_effort: bool | None = None
+    reasoning_effort_values: list[str] | None = None
+    reasoning_effort_aliases: dict[str, str] | None = None
+    vision: bool | None = None
+    max_images_per_request: int | None = None
+    response_format: bool | None = None
+    seed: bool | None = None
+    top_k: bool | None = None
+    stop: bool | None = None
+
+
+@dataclass(slots=True)
 class LLMModel:
-    """`/v1/models` kaydı. `task` uç seçimini belirler: decision -> `decide()`, ocr -> `ocr()` ..."""
+    """`/v1/models` kaydı (`models()`) ya da `/v1/models/{model}` tekil kaydı (`get_model()`).
+
+    `task` uç seçimini belirler: decision -> `decide()`, ocr -> `ocr()` ...
+    `context_length`, `default_max_output_tokens`, `capabilities`, `precision` hem
+    liste hem detay ucundan gelir; eski bir geçit sürümü bunları döndürmezse `None`
+    kalır (geriye dönük uyumlu).
+    """
 
     id: str
     task: str = "chat"
@@ -26,6 +54,10 @@ class LLMModel:
     owned_by: str = "evren"
     created: int = 0
     pricing: JSON | None = None
+    context_length: int | None = None
+    default_max_output_tokens: int | None = None
+    capabilities: LLMModelCapabilities | None = None
+    precision: str | None = None
 
 
 @dataclass(slots=True)
@@ -193,14 +225,34 @@ def _float(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
+def _parse_capabilities(c: JSON | None) -> LLMModelCapabilities | None:
+    if c is None:
+        return None
+    return LLMModelCapabilities(
+        tools=c.get("tools"), thinking=c.get("thinking"), reasoning_effort=c.get("reasoning_effort"),
+        reasoning_effort_values=c.get("reasoning_effort_values"),
+        reasoning_effort_aliases=c.get("reasoning_effort_aliases"), vision=c.get("vision"),
+        max_images_per_request=c.get("max_images_per_request"), response_format=c.get("response_format"),
+        seed=c.get("seed"), top_k=c.get("top_k"), stop=c.get("stop"),
+    )
+
+
+def _parse_model(m: JSON) -> LLMModel:
+    return LLMModel(
+        id=str(m["id"]), task=str(m.get("task") or "chat"), modalities=list(m.get("modalities") or ["text"]),
+        owned_by=str(m.get("owned_by") or "evren"), created=int(m.get("created") or 0), pricing=m.get("pricing"),
+        context_length=m.get("context_length"), default_max_output_tokens=m.get("default_max_output_tokens"),
+        capabilities=_parse_capabilities(m.get("capabilities")), precision=m.get("precision"),
+    )
+
+
 def parse_models(body: JSON) -> list[LLMModel]:
-    return [
-        LLMModel(
-            id=str(m["id"]), task=str(m.get("task") or "chat"), modalities=list(m.get("modalities") or ["text"]),
-            owned_by=str(m.get("owned_by") or "evren"), created=int(m.get("created") or 0), pricing=m.get("pricing"),
-        )
-        for m in body.get("data") or []
-    ]
+    return [_parse_model(m) for m in body.get("data") or []]
+
+
+def parse_model(body: JSON) -> LLMModel:
+    """`GET /v1/models/{model}` kaydı — tek bir modelin görev/modalite/fiyat/kapasite bilgisi."""
+    return _parse_model(body)
 
 
 def parse_decision(body: JSON, headers: httpx.Headers | None, requested_model: str) -> DecisionResult:
