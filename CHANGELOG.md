@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.0] - 2026-11-09
+
+### Added
+- `load_dataset()`: metin ve ses kayıt setlerini etiketleri (`labels`), NER aralıkları (`entities`) ve hücre düzeltmeleriyle pyarrow tablosu olarak yükler; `split=` verilmezse `{bölüm: tablo}`. Ses sütunu HF `Audio` düzeninde
+- `iter_dataset()`: dosya indirmeden akışlı okuma (Parquet satır grupları HTTP aralığıyla)
+- `export_dataset()` / `download_dataset()`: Parquet, JSONL, CSV; indirilen dosyalar SHA-256 ile doğrulanır
+- `evren_sdk.datasets.to_hf()`: HF `datasets` nesnesine çevirme
+- `pip install "evren-sdk[datasets]"` eki (pyarrow)
+
 ## [0.11.1] - 2026-11-04
 
 ### Fixed

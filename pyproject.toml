@@ -43,7 +43,8 @@ dependencies = [
 [project.optional-dependencies]
 edge = ["opencv-python>=4.8", "websockets>=12.0"]
 images = ["Pillow>=10"]
-dev = ["pytest", "pytest-asyncio", "ruff", "mypy", "Pillow>=10"]
+datasets = ["pyarrow>=14"]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy", "Pillow>=10", "pyarrow>=14"]
 
 [project.urls]
 Homepage = "https://evren.ssyz.org.tr"
@@ -80,5 +81,6 @@ strict = true
 
 # opsiyonel bağımlılıklar (edge, images) kurulu olmayabilir
 [[tool.mypy.overrides]]
-module = ["cv2", "cv2.*", "numpy", "numpy.*", "PIL", "PIL.*", "websockets", "websockets.*"]
+module = ["cv2", "cv2.*", "numpy", "numpy.*", "PIL", "PIL.*", "websockets", "websockets.*",
+          "pyarrow", "pyarrow.*", "datasets", "datasets.*"]
 ignore_missing_imports = true

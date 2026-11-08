@@ -176,6 +176,27 @@ SDK üzerinden doğrudan bir veri setine görsel yükleyebilirsiniz.
 resp = client.upload_to_dataset(dataset_id="<UUID>", image="yeni_gorsel.jpg")
 ```
 
+### Metin ve Ses Veri Setlerini Yükleme
+
+Kayıtlar etiketleri (`labels`), NER aralıkları (`entities`) ve hücre düzeltmeleriyle birlikte gelir.
+Ses setlerinde ses sütunu HF `Audio` düzenindedir (`{"bytes", "path"}`). Gerekli ek: `pip install "evren-sdk[datasets]"`.
+
+```python
+train = client.load_dataset("sahip/veri-seti", split="train")   # pyarrow.Table
+df = train.to_pandas()
+
+for row in client.iter_dataset("sahip/veri-seti", split="test"):  # indirmeden akışla
+    print(row["item_id"], row["labels"])
+
+client.download_dataset("sahip/veri-seti", "veri/", format="jsonl")  # parquet, jsonl, csv
+
+from evren_sdk.datasets import to_hf
+ds = to_hf(client.load_dataset("sahip/veri-seti", version="v1"))  # HF DatasetDict
+```
+
+İlk çağrıda platform dışa aktarımı hazırlar (görsel setlerle aynı dışa aktarım kredisi); aynı içerik
+sonraki çağrılarda ücretsiz ve yerel önbellekten gelir. Dosyalar SHA-256 ile doğrulanır.
+
 ### Asenkron Kullanım
 
 ```python
@@ -599,6 +620,24 @@ Upload images to a dataset directly from the SDK.
 ```python
 resp = client.upload_to_dataset(dataset_id="<UUID>", image="new_image.jpg")
 ```
+
+### Text and Audio Datasets
+
+Records come with their labels (`labels`), NER spans (`entities`) and cell corrections. Audio columns
+use the HF `Audio` layout (`{"bytes", "path"}`). Requires `pip install "evren-sdk[datasets]"`.
+
+```python
+train = client.load_dataset("owner/dataset", split="train")   # pyarrow.Table
+for row in client.iter_dataset("owner/dataset", split="test"):  # streaming, no download
+    ...
+client.download_dataset("owner/dataset", "data/", format="jsonl")
+
+from evren_sdk.datasets import to_hf
+ds = to_hf(client.load_dataset("owner/dataset", version="v1"))  # HF DatasetDict
+```
+
+The first call prepares an export on the platform (same export credit as image datasets); the same
+content is free afterwards and served from the local cache. Files are verified with SHA-256.
 
 ### Async Usage
 

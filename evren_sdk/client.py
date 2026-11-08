@@ -591,6 +591,42 @@ class EvrenClient:
         confirmed: JSON = _unwrap(r3.json())
         return confirmed
 
+    def load_dataset(self, dataset: str, *, split: str | None = None, version: str | None = None,
+                     columns: list[str] | None = None, cache_dir: str | Path | None = None) -> Any:
+        """Metin/ses kayıt setini etiketleriyle pyarrow tablosu olarak yükler.
+
+        ``split`` verilmezse ``{bölüm: tablo}`` döner. Dosyalar önbelleklenir; aynı içerik ikinci kez
+        indirilmez. ``evren_sdk.datasets.to_hf`` ile HF `datasets` nesnesine çevrilir.
+
+        >>> t = c.load_dataset("owner/slug", split="train")
+        >>> df = t.to_pandas()
+        """
+        from .datasets import load
+
+        return load(self._http, dataset, split=split, version=version, columns=columns, cache_dir=cache_dir)
+
+    def iter_dataset(self, dataset: str, *, split: str | None = None, version: str | None = None,
+                     columns: list[str] | None = None, batch_size: int = 1024) -> Any:
+        """Kayıtları indirmeden akışla okur (satır sözlükleri)."""
+        from .datasets import iterate
+
+        return iterate(self._http, dataset, split=split, version=version, columns=columns, batch_size=batch_size)
+
+    def export_dataset(self, dataset: str, *, format: str = "parquet", version: str | None = None,
+                       wait: bool = True) -> Any:
+        """Etiketli dışa aktarımı başlatır ya da hazır olanı döndürür (parquet, jsonl, csv)."""
+        from .datasets import export
+
+        return export(self._http, dataset, format=format, version=version, wait=wait)
+
+    def download_dataset(self, dataset: str, dest: str | Path, *, format: str = "parquet",
+                         version: str | None = None, split: str | None = None) -> list[Path]:
+        """Dışa aktarım dosyalarını klasöre indirir; bütünlük özeti doğrulanır."""
+        from .datasets import download, export
+
+        exp = export(self._http, dataset, format=format, version=version)
+        return download(self._http, exp, Path(dest), split)
+
     def close(self) -> None:
         self._http.close()
 

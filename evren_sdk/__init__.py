@@ -6,6 +6,7 @@ API-anahtarı sınıfı, karıştırılmamalı."""
 
 from ._version import __version__
 from .client import AsyncEvrenClient, EvrenClient
+from .datasets import DatasetExport, DatasetFile, to_hf
 from .exceptions import (
     AuthenticationError,
     EvrenError,
@@ -62,6 +63,8 @@ __all__ = [
     "ChatDelta",
     "ChatMessage",
     "ClassInfo",
+    "DatasetExport",
+    "DatasetFile",
     "DecisionBatchResult",
     "DecisionResult",
     "EvrenCamera",
@@ -100,6 +103,7 @@ __all__ = [
     "__version__",
     "draw_predictions",
     "encode_image",
+    "to_hf",
 ]
 
 try:
