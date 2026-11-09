@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.13.0] - 2026-11-09
 
 ### Added
 - `LLMModel`: `context_length`, `default_max_output_tokens`, `precision` ve tipli `capabilities` alt-nesnesi (`tools`, `thinking`, `reasoning_effort`, `reasoning_effort_values`, `reasoning_effort_aliases`, `vision`, `max_images_per_request`, `response_format`, `seed`, `top_k`, `stop`) — hem `models()` hem `get_model()` yanıtında dolu; eski geçit yanıtlarında yoksa `None` kalır (geriye dönük uyumlu)
