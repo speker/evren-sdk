@@ -10,6 +10,7 @@ import evren_sdk.llm_client as smod
 from evren_sdk import (
     AsyncEvrenLLMClient,
     EvrenLLMClient,
+    LLMNotFoundError,
     LLMRateLimitError,
     LLMValidationError,
     encode_image,
@@ -208,6 +209,68 @@ def test_models():
     models = _client(lambda req: httpx.Response(200, json=body)).models()
     assert models[0].task == "decision" and "image" in models[0].modalities
     assert models[1].task == "chat" and models[1].modalities == ["text"]
+    # Eski (capability alanlarından önceki) geçit yanıtı — geriye dönük uyum, None varsayılanı
+    assert models[0].context_length is None and models[0].default_max_output_tokens is None
+    assert models[0].capabilities is None and models[0].precision is None
+
+
+# Gerçek `GET /v1/models` üzerinden canlı doğrulanmış gövde (glm-5.3, 2026-11-07)
+GLM_53_DETAIL = {
+    "id": "glm-5.3", "object": "model", "created": 1789343625, "owned_by": "evren", "task": "chat",
+    "modalities": ["text"],
+    "pricing": {"prompt_token_price": 0.0, "completion_token_price": 0.0, "currency": "CR",
+                "free_until": "2026-12-01"},
+    "context_length": 524288, "default_max_output_tokens": 16384,
+    "capabilities": {
+        "tools": True, "thinking": True, "reasoning_effort": True, "reasoning_effort_values": None,
+        "reasoning_effort_aliases": {"medium": "high", "minimal": "low"}, "vision": False,
+        "max_images_per_request": None, "response_format": True, "seed": True, "top_k": True, "stop": True,
+    },
+    "precision": "FP8",
+}
+
+
+def test_models_capability_fields():
+    body = {"data": [GLM_53_DETAIL]}
+
+    m = _client(lambda req: httpx.Response(200, json=body)).models()[0]
+
+    assert m.context_length == 524288 and m.default_max_output_tokens == 16384 and m.precision == "FP8"
+    assert m.capabilities.tools is True and m.capabilities.thinking is True
+    assert m.capabilities.reasoning_effort is True and m.capabilities.reasoning_effort_values is None
+    assert m.capabilities.reasoning_effort_aliases == {"medium": "high", "minimal": "low"}
+    assert m.capabilities.vision is False and m.capabilities.max_images_per_request is None
+    assert m.capabilities.response_format is True
+    assert m.capabilities.seed is True and m.capabilities.top_k is True and m.capabilities.stop is True
+
+
+def test_get_model():
+    seen = {}
+
+    def h(req):
+        seen["path"] = req.url.path
+        return httpx.Response(200, json=GLM_53_DETAIL)
+
+    m = _client(h).get_model("glm-5.3")
+
+    assert seen["path"] == "/v1/models/glm-5.3"
+    assert m.id == "glm-5.3" and m.context_length == 524288 and m.precision == "FP8"
+    assert m.capabilities.tools is True and m.capabilities.vision is False
+
+
+def test_get_model_not_found():
+    resp = httpx.Response(404, json={"error": {"message": "model bulunamadı: yok-xyz",
+                                               "type": "invalid_request_error", "code": "model_not_found"}})
+    with pytest.raises(LLMNotFoundError, match="bulunamadı"):
+        _client(lambda req: resp).get_model("yok-xyz")
+
+
+@pytest.mark.asyncio
+async def test_async_get_model():
+    c = AsyncEvrenLLMClient(KEY, transport=httpx.MockTransport(lambda req: httpx.Response(200, json=GLM_53_DETAIL)))
+    async with c:
+        m = await c.get_model("glm-5.3")
+    assert m.id == "glm-5.3" and m.capabilities.reasoning_effort is True and m.default_max_output_tokens == 16384
 
 
 def test_validation_error():

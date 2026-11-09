@@ -26,6 +26,7 @@ from .llm_tasks import (
     decision_body,
     parse_decision,
     parse_decision_batch,
+    parse_model,
     parse_models,
     parse_ocr,
     parse_quota,
@@ -144,6 +145,14 @@ class AsyncEvrenLLMClient:
 
     async def models(self) -> list[LLMModel]:
         return parse_models((await self._send("GET", "/v1/models")).json())
+
+    async def get_model(self, model: str) -> LLMModel:
+        """Tek bir modelin detayı (`/v1/models/{model}`) — `context_length`, `capabilities` vb. dahil.
+
+        Raises:
+            LLMNotFoundError: `model` geçitte tanımlı değilse.
+        """
+        return parse_model((await self._send("GET", f"/v1/models/{model}")).json())
 
     async def decide(
         self, model: str, state: Any, questions: dict[str, Any], *, images: list[ImageSource] | None = None,

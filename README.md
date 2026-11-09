@@ -467,11 +467,19 @@ except InferenceError:
 | `speak(model, text, voice=, response_format=, instructions=)` | `/v1/audio/speech` | `SpeechResult` |
 | `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
+| `get_model(model)` | `/v1/models/{model}` | `LLMModel` |
 | `quota()` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
 `encode_image(kaynak, max_side=None)` yol, bayt ya da `data:` URL'yi geçidin kabul
 ettiği gömülü biçime çevirir.
+
+`LLMModel` artık `context_length`, `default_max_output_tokens`, `precision` ve
+tipli `capabilities` (`tools`, `thinking`, `reasoning_effort`,
+`reasoning_effort_values`, `reasoning_effort_aliases`, `vision`,
+`max_images_per_request`, `response_format`, `seed`, `top_k`, `stop`) alanlarını
+taşır — bir istek göndermeden önce modelin hangi parametreyi desteklediğini
+denetlemek için. Eski geçit yanıtlarında bu alanlar yoksa `None` kalır.
 
 </details>
 
@@ -868,11 +876,19 @@ except InferenceError:
 | `speak(model, text, voice=, response_format=, instructions=)` | `/v1/audio/speech` | `SpeechResult` |
 | `respond(model, input, **kw)` / `get_response(id)` | `/v1/responses` | `ResponseResult` |
 | `models()` / `list_models()` | `/v1/models` | `list[LLMModel]` / `list[str]` |
+| `get_model(model)` | `/v1/models/{model}` | `LLMModel` |
 | `quota()` | `/v1/quota` | `QuotaStatus` |
 | `request_status(request_id)` | `/v1/requests/{id}` | `RequestStatus` |
 
 `encode_image(source, max_side=None)` turns a path, bytes or `data:` URL into the
 embedded form the gateway accepts.
+
+`LLMModel` now carries `context_length`, `default_max_output_tokens`, `precision`
+and a typed `capabilities` (`tools`, `thinking`, `reasoning_effort`,
+`reasoning_effort_values`, `reasoning_effort_aliases`, `vision`,
+`max_images_per_request`, `response_format`, `seed`, `top_k`, `stop`) — check what
+a model supports before sending a request that would otherwise 400. Fields stay
+`None` when an older gateway response doesn't include them.
 
 </details>
 

@@ -32,6 +32,7 @@ from .llm_tasks import (
     decision_body,
     parse_decision,
     parse_decision_batch,
+    parse_model,
     parse_models,
     parse_ocr,
     parse_quota,
@@ -206,6 +207,14 @@ class EvrenLLMClient:
     def models(self) -> list[LLMModel]:
         """Anahtarın erişebildiği modeller, görev (`task`) ve modaliteleriyle."""
         return parse_models(self._send("GET", "/v1/models").json())
+
+    def get_model(self, model: str) -> LLMModel:
+        """Tek bir modelin detayı (`/v1/models/{model}`) — `context_length`, `capabilities` vb. dahil.
+
+        Raises:
+            LLMNotFoundError: `model` geçitte tanımlı değilse.
+        """
+        return parse_model(self._send("GET", f"/v1/models/{model}").json())
 
     def decide(
         self, model: str, state: Any, questions: dict[str, Any], *, images: list[ImageSource] | None = None,
